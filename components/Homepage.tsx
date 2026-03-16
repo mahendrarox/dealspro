@@ -46,7 +46,7 @@ function useInView() {
   return [ref, v];
 }
 
-function formatPhone(val) {
+function formatPhone(val: string) {
   const d = val.replace(/\D/g, "").slice(0, 10);
   if (!d.length) return "";
   if (d.length <= 3) return `(${d}`;
