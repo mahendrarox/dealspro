@@ -100,6 +100,8 @@ function CaptureForm({ dark }) {
   const [optIn, setOptIn] = useState(false);
   const [focus, setFocus] = useState(null);
   const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [phoneTouched, setPhoneTouched] = useState(false);
   const digits = phone.replace(/\D/g, "");
@@ -108,7 +110,29 @@ function CaptureForm({ dark }) {
   const allValid = nameValid && phoneValid && optIn;
   const digitsLeft = 10 - digits.length;
 
-  const submit = () => { if (allValid) setDone(true); };
+  const submit = async () => {
+    if (!allValid || loading) return;
+    setLoading(true);
+    setSubmitError("");
+    console.log("[Form] Submit received:", { name: name.trim(), phone: `+1${digits}` });
+    try {
+      const res = await fetch("/api/lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), phone: `+1${digits}`, optIn: true }),
+      });
+      const data = await res.json();
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else {
+        setSubmitError(data.error || "Something went wrong. Please try again.");
+        setLoading(false);
+      }
+    } catch {
+      setSubmitError("Network error. Please try again.");
+      setLoading(false);
+    }
+  };
 
   if (done) return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", animation: "fadeUp 0.4s ease", padding: "16px 0" }}>
@@ -190,22 +214,28 @@ function CaptureForm({ dark }) {
 
       {/* Submit - disabled until all valid */}
       <div style={{ marginTop: "14px" }}>
-        <button onClick={allValid ? submit : undefined} style={{
+        <button onClick={allValid && !loading ? submit : undefined} style={{
           width: "100%", padding: "16px 28px",
           border: "none",
           borderRadius: T.radius.lg, fontFamily: T.font.display, fontWeight: 700,
           fontSize: "15px", letterSpacing: "0.03em",
           background: "#F93A25",
-          opacity: allValid ? 1 : 0.4,
+          opacity: allValid && !loading ? 1 : 0.4,
           color: "#FFFFFF",
-          cursor: allValid ? "pointer" : "default",
+          cursor: allValid && !loading ? "pointer" : "default",
           transition: "all 200ms ease",
           display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: allValid ? "0 4px 12px rgba(249,58,37,0.4)" : "none",
+          boxShadow: allValid && !loading ? "0 4px 12px rgba(249,58,37,0.4)" : "none",
         }}>
-          {allValid ? "Get My Deals →" : !nameValid ? "Enter your name to continue" : !phoneValid ? (digits.length === 0 ? "Enter your phone number" : `${digitsLeft} digit${digitsLeft !== 1 ? "s" : ""} remaining`) : "Check the opt-in box above"}
+          {loading ? "Setting up checkout..." : allValid ? "Get My Deals →" : !nameValid ? "Enter your name to continue" : !phoneValid ? (digits.length === 0 ? "Enter your phone number" : `${digitsLeft} digit${digitsLeft !== 1 ? "s" : ""} remaining`) : "Check the opt-in box above"}
         </button>
       </div>
+
+      {submitError && (
+        <div style={{ marginTop: "10px", padding: "10px 14px", borderRadius: T.radius.md, background: "rgba(249,58,37,0.1)", border: "1px solid rgba(249,58,37,0.25)", fontFamily: T.font.display, fontSize: "13px", color: "#F93A25" }}>
+          {submitError}
+        </div>
+      )}
 
       <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "10px", textAlign: "center" }}>Free forever. No spam. Unsubscribe anytime.</div>
     </div>
