@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
+import twilio from "twilio";
 import { supabase } from "@/lib/supabase";
 import { HARDCODED_DROP } from "@/lib/constants";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID!,
+  process.env.TWILIO_AUTH_TOKEN!
+);
 
 export async function POST(request: NextRequest) {
   console.log("[Lead] Form submit received");
@@ -28,7 +31,7 @@ export async function POST(request: NextRequest) {
   console.log("[Lead] Normalized phone:", e164Phone);
 
   // Upsert user into Supabase
-  console.log("[Lead] Upserting user:", { name, phone: e164Phone });
+  console.log("[Lead] Upserting user:", { name: name.trim(), phone: e164Phone });
   const { data: user, error: userError } = await supabase
     .from("users")
     .upsert(
@@ -49,41 +52,29 @@ export async function POST(request: NextRequest) {
   }
   console.log("[Lead] User upserted, id:", user.id);
 
-  // Create Stripe Checkout Session
-  console.log("[Lead] Creating Stripe checkout session");
+  // Send SMS via Twilio
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const claimUrl = `${appUrl}/deal/${HARDCODED_DROP.id}?uid=${user.id}`;
+  const message =
+    `Hey ${name.trim()}! Your DealsPro drop is ready.\n` +
+    `${HARDCODED_DROP.title} - $${(HARDCODED_DROP.price_cents / 100).toFixed(2)} (50% OFF)\n` +
+    `Pickup ${HARDCODED_DROP.pickup_window}\n` +
+    `Claim here: ${claimUrl}`;
 
-  let session: Stripe.Checkout.Session;
+  console.log("📩 Sending SMS to:", e164Phone);
+  console.log("📨 Message:", message);
+
   try {
-    session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            unit_amount: HARDCODED_DROP.price_cents,
-            product_data: {
-              name: HARDCODED_DROP.title,
-              description: `${HARDCODED_DROP.restaurant_name} · Pickup ${HARDCODED_DROP.pickup_window}`,
-            },
-          },
-          quantity: 1,
-        },
-      ],
-      metadata: {
-        user_id: user.id,
-        drop_id: HARDCODED_DROP.id,
-        drop_title: HARDCODED_DROP.title,
-      },
-      success_url: `${appUrl}/ticket/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}`,
+    await twilioClient.messages.create({
+      body: message,
+      from: process.env.TWILIO_PHONE_NUMBER!,
+      to: e164Phone,
     });
-  } catch (err) {
-    console.error("[Lead] Stripe session creation error:", err);
-    return NextResponse.json({ error: "Payment setup failed" }, { status: 500 });
+    console.log("✅ SMS sent successfully");
+  } catch (error) {
+    console.error("❌ SMS error:", error);
+    // Don't fail the request — user is saved, SMS is best-effort
   }
 
-  console.log("[Lead] Stripe checkout session created:", session.id);
-  return NextResponse.json({ checkoutUrl: session.url });
+  return NextResponse.json({ success: true });
 }

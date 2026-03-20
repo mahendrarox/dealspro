@@ -122,8 +122,8 @@ function CaptureForm({ dark }) {
         body: JSON.stringify({ name: name.trim(), phone: `+1${digits}`, optIn: true }),
       });
       const data = await res.json();
-      if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+      if (data.success) {
+        setDone(true);
       } else {
         setSubmitError(data.error || "Something went wrong. Please try again.");
         setLoading(false);
