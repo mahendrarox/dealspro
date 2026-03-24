@@ -135,11 +135,20 @@ function CaptureForm({ dark }) {
   };
 
   if (done) return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", animation: "fadeUp 0.4s ease", padding: "16px 0" }}>
-      <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: T.color.green500, display: "flex", alignItems: "center", justifyContent: "center", animation: "checkPop 0.5s cubic-bezier(0.34,1.56,0.64,1)" }}>
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+    <div style={{
+      width: "100%", maxWidth: "480px",
+      background: dark ? "rgba(255,255,255,0.06)" : T.color.n0,
+      border: `1.5px solid ${dark ? "rgba(255,255,255,0.1)" : T.color.n200}`,
+      borderRadius: T.radius.xxl,
+      padding: "40px 28px",
+      boxShadow: dark ? "0 8px 40px rgba(0,0,0,0.4)" : "0 8px 30px rgba(0,0,0,0.08)",
+      backdropFilter: "blur(12px)",
+      display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", animation: "fadeUp 0.4s ease",
+    }}>
+      <div style={{ width: "60px", height: "60px", borderRadius: "50%", background: T.color.green500, display: "flex", alignItems: "center", justifyContent: "center", animation: "checkPop 0.5s cubic-bezier(0.34,1.56,0.64,1)" }}>
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
       </div>
-      <div style={{ fontFamily: T.font.display, fontWeight: 700, fontSize: "18px", color: dark ? "#fff" : T.color.n900 }}>You're in, {name.trim().split(" ")[0]}!</div>
+      <div style={{ fontFamily: T.font.display, fontWeight: 700, fontSize: "20px", color: dark ? "#fff" : T.color.n900 }}>You're in, {name.trim().split(" ")[0]}!</div>
       <div style={{ fontFamily: T.font.display, fontSize: "14px", color: T.color.n400 }}>Check your phone for your first deals.</div>
     </div>
   );
@@ -149,95 +158,128 @@ function CaptureForm({ dark }) {
   const nameBorder = nameErr ? "#DC2626" : nameValid && nameTouched ? T.color.green500 : focus === "name" ? T.color.red500 : dark ? T.color.n800 : T.color.n300;
   const phoneBorder = phoneErr ? "#DC2626" : phoneValid ? T.color.green500 : focus === "phone" ? T.color.red500 : dark ? T.color.n800 : T.color.n300;
 
+  const cardBg = dark ? "rgba(255,255,255,0.06)" : T.color.n0;
+  const cardBorder = dark ? "rgba(255,255,255,0.1)" : T.color.n200;
+  const labelColor = dark ? "rgba(255,255,255,0.7)" : T.color.n500;
+  const inputBg = dark ? "rgba(0,0,0,0.3)" : T.color.n50;
+
   return (
-    <div style={{ width: "100%", maxWidth: "460px" }}>
+    <div style={{
+      width: "100%", maxWidth: "480px",
+      background: cardBg,
+      border: `1.5px solid ${cardBorder}`,
+      borderRadius: T.radius.xxl,
+      padding: "32px 28px",
+      boxShadow: dark ? "0 8px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05)" : "0 8px 30px rgba(0,0,0,0.08)",
+      backdropFilter: "blur(12px)",
+    }}>
+      <div style={{ textAlign: "center", marginBottom: "24px" }}>
+        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: dark ? "#fff" : T.color.n900, marginBottom: "6px" }}>Get Exclusive Deals</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "14px", color: dark ? T.color.n400 : T.color.n500 }}>Sign up in 10 seconds. No app needed.</div>
+      </div>
+
       {/* Name */}
-      <div style={{ position: "relative", marginBottom: "10px" }}>
-        <input type="text" placeholder="Your first name" value={name}
-          onChange={e => { setName(e.target.value); if (!nameTouched) setNameTouched(true); }}
-          onFocus={() => setFocus("name")} onBlur={() => { setFocus(null); setNameTouched(true); }}
-          style={{ width: "100%", padding: "14px 40px 14px 16px", border: `2px solid ${nameBorder}`, borderRadius: T.radius.lg, fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: dark ? "#fff" : T.color.n900, background: dark ? T.color.n800 : T.color.n0, outline: "none", boxShadow: focus === "name" ? T.shadow.focus : "none", transition: `all ${T.tr.base}` }}
-        />
-        {/* Live indicator */}
-        {nameTouched && (
-          <div style={{ position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)" }}>
-            {nameValid ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            )}
-          </div>
-        )}
+      <div style={{ marginBottom: "16px" }}>
+        <label style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
+          Your Name
+        </label>
+        <div style={{ position: "relative" }}>
+          <input type="text" placeholder="e.g. Sarah" value={name}
+            onChange={e => { setName(e.target.value); if (!nameTouched) setNameTouched(true); }}
+            onFocus={() => setFocus("name")} onBlur={() => { setFocus(null); setNameTouched(true); }}
+            style={{ width: "100%", padding: "16px 44px 16px 16px", border: `2px solid ${nameBorder}`, borderRadius: T.radius.lg, fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: dark ? "#fff" : T.color.n900, background: inputBg, outline: "none", boxShadow: focus === "name" ? T.shadow.focus : "none", transition: `all ${T.tr.base}` }}
+          />
+          {nameTouched && (
+            <div style={{ position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)" }}>
+              {nameValid ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Phone */}
-      <div style={{ display: "flex", borderRadius: T.radius.lg, overflow: "hidden", border: `2px solid ${phoneBorder}`, boxShadow: focus === "phone" ? T.shadow.focus : "none", transition: `all ${T.tr.base}`, background: dark ? T.color.n800 : T.color.n0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 12px", background: dark ? T.color.n950 : T.color.n50, borderRight: `1px solid ${dark ? T.color.n800 : T.color.n200}`, flexShrink: 0 }}>
-          <span style={{ fontSize: "14px", fontWeight: 700, color: T.color.n400 }}>US</span>
-          <img src="https://flagcdn.com/w40/us.png" alt="US" style={{ width: "20px", height: "14px", objectFit: "cover", borderRadius: "2px" }} />
-          <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 700, color: T.color.n400 }}>+1</span>
-        </div>
-        <input type="tel" placeholder="(555) 123-4567" value={phone}
-          onChange={e => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
-          onFocus={() => setFocus("phone")} onBlur={() => { setFocus(null); setPhoneTouched(true); }}
-          onKeyDown={e => { if (e.key === "Enter" && allValid) submit(); }}
-          style={{ flex: 1, padding: "14px", border: "none", outline: "none", fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: dark ? "#fff" : T.color.n900, background: "transparent", minWidth: 0 }}
-        />
-        {/* Live phone indicator */}
-        {phoneTouched && digits.length > 0 && (
-          <div style={{ display: "flex", alignItems: "center", paddingRight: "12px" }}>
-            {phoneValid ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-            ) : (
-              <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.amber500 }}>{digitsLeft} left</span>
-            )}
+      <div style={{ marginBottom: "20px" }}>
+        <label style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
+          Phone Number
+        </label>
+        <div style={{ display: "flex", borderRadius: T.radius.lg, overflow: "hidden", border: `2px solid ${phoneBorder}`, boxShadow: focus === "phone" ? T.shadow.focus : "none", transition: `all ${T.tr.base}`, background: inputBg }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 14px", background: dark ? "rgba(0,0,0,0.3)" : T.color.n200, borderRight: `1px solid ${dark ? "rgba(255,255,255,0.08)" : T.color.n300}`, flexShrink: 0 }}>
+            <img src="https://flagcdn.com/w40/us.png" alt="US" style={{ width: "20px", height: "14px", objectFit: "cover", borderRadius: "2px" }} />
+            <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 700, color: dark ? T.color.n400 : T.color.n500 }}>+1</span>
           </div>
-        )}
+          <input type="tel" placeholder="(555) 123-4567" value={phone}
+            onChange={e => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
+            onFocus={() => setFocus("phone")} onBlur={() => { setFocus(null); setPhoneTouched(true); }}
+            onKeyDown={e => { if (e.key === "Enter" && allValid) submit(); }}
+            style={{ flex: 1, padding: "16px 14px", border: "none", outline: "none", fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: dark ? "#fff" : T.color.n900, background: "transparent", minWidth: 0 }}
+          />
+          {phoneTouched && digits.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", paddingRight: "14px" }}>
+              {phoneValid ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+              ) : (
+                <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.amber500 }}>{digitsLeft} left</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Opt-in checkbox */}
-      <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginTop: "14px", cursor: "pointer" }}
-        onClick={() => setOptIn(!optIn)}>
-        <div style={{
-          width: "20px", height: "20px", borderRadius: "4px", flexShrink: 0, marginTop: "1px",
-          border: `2px solid ${optIn ? T.color.red500 : dark ? T.color.n400 : T.color.n300}`,
-          background: optIn ? T.color.red500 : "transparent",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          transition: `all ${T.tr.fast}`,
-        }}>
-          {optIn && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
-        </div>
-        <span style={{ fontFamily: T.font.display, fontSize: "12px", lineHeight: 1.5, color: dark ? T.color.n400 : T.color.n500 }}>
-          I agree to receive exclusive deal alerts and promotions via RCS/SMS. Message & data rates may apply. Reply STOP to unsubscribe anytime.
-        </span>
-      </label>
-
-      {/* Submit - disabled until all valid */}
-      <div style={{ marginTop: "14px" }}>
-        <button onClick={allValid && !loading ? submit : undefined} style={{
-          width: "100%", padding: "16px 28px",
-          border: "none",
-          borderRadius: T.radius.lg, fontFamily: T.font.display, fontWeight: 700,
-          fontSize: "15px", letterSpacing: "0.03em",
-          background: "#F93A25",
-          opacity: allValid && !loading ? 1 : 0.4,
-          color: "#FFFFFF",
-          cursor: allValid && !loading ? "pointer" : "default",
-          transition: "all 200ms ease",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: allValid && !loading ? "0 4px 12px rgba(249,58,37,0.4)" : "none",
-        }}>
-          {loading ? "Setting up checkout..." : allValid ? "Get My Deals →" : !nameValid ? "Enter your name to continue" : !phoneValid ? (digits.length === 0 ? "Enter your phone number" : `${digitsLeft} digit${digitsLeft !== 1 ? "s" : ""} remaining`) : "Check the opt-in box above"}
-        </button>
+      <div style={{
+        background: dark ? "rgba(255,255,255,0.04)" : T.color.n50,
+        border: `1px solid ${dark ? "rgba(255,255,255,0.08)" : T.color.n200}`,
+        borderRadius: T.radius.lg,
+        padding: "14px 16px",
+        marginBottom: "20px",
+      }}>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: "12px", cursor: "pointer" }}
+          onClick={() => setOptIn(!optIn)}>
+          <div style={{
+            width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0, marginTop: "1px",
+            border: `2px solid ${optIn ? T.color.red500 : dark ? "rgba(255,255,255,0.3)" : T.color.n300}`,
+            background: optIn ? T.color.red500 : dark ? "rgba(0,0,0,0.2)" : T.color.n0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: `all ${T.tr.fast}`,
+            boxShadow: optIn ? "0 2px 8px rgba(249,58,37,0.3)" : "none",
+          }}>
+            {optIn && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+          </div>
+          <span style={{ fontFamily: T.font.display, fontSize: "13px", lineHeight: 1.5, color: dark ? "rgba(255,255,255,0.6)" : T.color.n500 }}>
+            I agree to receive exclusive deal alerts and promotions via RCS/SMS. Message & data rates may apply. Reply STOP to unsubscribe anytime.
+          </span>
+        </label>
       </div>
 
+      {/* Submit */}
+      <button onClick={allValid && !loading ? submit : undefined} style={{
+        width: "100%", padding: "18px 28px",
+        border: "none",
+        borderRadius: T.radius.lg, fontFamily: T.font.display, fontWeight: 700,
+        fontSize: "16px", letterSpacing: "0.03em",
+        background: allValid && !loading ? "linear-gradient(135deg, #F93A25 0%, #E0311F 100%)" : dark ? "rgba(255,255,255,0.08)" : T.color.n200,
+        color: allValid && !loading ? "#FFFFFF" : dark ? "rgba(255,255,255,0.3)" : T.color.n400,
+        cursor: allValid && !loading ? "pointer" : "default",
+        transition: "all 250ms ease",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+        boxShadow: allValid && !loading ? "0 4px 16px rgba(249,58,37,0.45), 0 1px 3px rgba(0,0,0,0.1)" : "none",
+        transform: allValid && !loading ? "none" : "none",
+      }}>
+        {loading ? "Setting up checkout..." : allValid ? "Get My Deals" : !nameValid ? "Enter your name to continue" : !phoneValid ? (digits.length === 0 ? "Enter your phone number" : `${digitsLeft} digit${digitsLeft !== 1 ? "s" : ""} remaining`) : "Check the opt-in box above"}
+        {allValid && !loading && <span style={{ fontSize: "18px" }}>→</span>}
+      </button>
+
       {submitError && (
-        <div style={{ marginTop: "10px", padding: "10px 14px", borderRadius: T.radius.md, background: "rgba(249,58,37,0.1)", border: "1px solid rgba(249,58,37,0.25)", fontFamily: T.font.display, fontSize: "13px", color: "#F93A25" }}>
+        <div style={{ marginTop: "12px", padding: "12px 16px", borderRadius: T.radius.md, background: "rgba(249,58,37,0.1)", border: "1px solid rgba(249,58,37,0.25)", fontFamily: T.font.display, fontSize: "13px", color: "#F93A25" }}>
           {submitError}
         </div>
       )}
 
-      <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "10px", textAlign: "center" }}>Free forever. No spam. Unsubscribe anytime.</div>
+      <div style={{ fontFamily: T.font.display, fontSize: "12px", color: dark ? "rgba(255,255,255,0.35)" : T.color.n400, marginTop: "14px", textAlign: "center" }}>Free forever. No spam. Unsubscribe anytime.</div>
     </div>
   );
 }
