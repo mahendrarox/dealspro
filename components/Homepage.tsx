@@ -155,13 +155,13 @@ function CaptureForm({ dark }) {
 
   const nameErr = nameTouched && !nameValid;
   const phoneErr = phoneTouched && digits.length > 0 && !phoneValid;
-  const nameBorder = nameErr ? "#DC2626" : nameValid && nameTouched ? T.color.green500 : focus === "name" ? T.color.red500 : dark ? T.color.n800 : T.color.n300;
-  const phoneBorder = phoneErr ? "#DC2626" : phoneValid ? T.color.green500 : focus === "phone" ? T.color.red500 : dark ? T.color.n800 : T.color.n300;
+  const nameBorder = nameErr ? "#DC2626" : nameValid && nameTouched ? T.color.green500 : focus === "name" ? T.color.red500 : T.color.n300;
+  const phoneBorder = phoneErr ? "#DC2626" : phoneValid ? T.color.green500 : focus === "phone" ? T.color.red500 : T.color.n300;
 
-  const cardBg = dark ? "rgba(255,255,255,0.06)" : T.color.n0;
-  const cardBorder = dark ? "rgba(255,255,255,0.1)" : T.color.n200;
-  const labelColor = dark ? "rgba(255,255,255,0.7)" : T.color.n500;
-  const inputBg = dark ? "rgba(0,0,0,0.3)" : T.color.n50;
+  const cardBg = "#FFFFFF";
+  const cardBorder = T.color.n200;
+  const labelColor = T.color.n500;
+  const inputBg = "#F5F5F5";
 
   return (
     <div style={{
@@ -170,12 +170,12 @@ function CaptureForm({ dark }) {
       border: `1.5px solid ${cardBorder}`,
       borderRadius: T.radius.xxl,
       padding: "32px 28px",
-      boxShadow: dark ? "0 8px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05)" : "0 8px 30px rgba(0,0,0,0.08)",
+      boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
       backdropFilter: "blur(12px)",
     }}>
       <div style={{ textAlign: "center", marginBottom: "24px" }}>
-        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: dark ? "#fff" : T.color.n900, marginBottom: "6px" }}>Get Exclusive Deals</div>
-        <div style={{ fontFamily: T.font.display, fontSize: "14px", color: dark ? T.color.n400 : T.color.n500 }}>Sign up in 10 seconds. No app needed.</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "6px" }}>Get Exclusive Deals</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "14px", color: T.color.n500 }}>Sign up in 10 seconds. No app needed.</div>
       </div>
 
       {/* Name */}
@@ -187,7 +187,7 @@ function CaptureForm({ dark }) {
           <input type="text" placeholder="e.g. Sarah" value={name}
             onChange={e => { setName(e.target.value); if (!nameTouched) setNameTouched(true); }}
             onFocus={() => setFocus("name")} onBlur={() => { setFocus(null); setNameTouched(true); }}
-            style={{ width: "100%", padding: "16px 44px 16px 16px", border: `2px solid ${nameBorder}`, borderRadius: T.radius.lg, fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: dark ? "#fff" : T.color.n900, background: inputBg, outline: "none", boxShadow: focus === "name" ? T.shadow.focus : "none", transition: `all ${T.tr.base}` }}
+            style={{ width: "100%", padding: "16px 44px 16px 16px", border: `2px solid ${nameBorder}`, borderRadius: T.radius.lg, fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: T.color.n900, background: inputBg, outline: "none", boxShadow: focus === "name" ? T.shadow.focus : "none", transition: `all ${T.tr.base}` }}
           />
           {nameTouched && (
             <div style={{ position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)" }}>
@@ -207,15 +207,15 @@ function CaptureForm({ dark }) {
           Phone Number
         </label>
         <div style={{ display: "flex", borderRadius: T.radius.lg, overflow: "hidden", border: `2px solid ${phoneBorder}`, boxShadow: focus === "phone" ? T.shadow.focus : "none", transition: `all ${T.tr.base}`, background: inputBg }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 14px", background: dark ? "rgba(0,0,0,0.3)" : T.color.n200, borderRight: `1px solid ${dark ? "rgba(255,255,255,0.08)" : T.color.n300}`, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 14px", background: T.color.n200, borderRight: `1px solid ${T.color.n300}`, flexShrink: 0 }}>
             <img src="https://flagcdn.com/w40/us.png" alt="US" style={{ width: "20px", height: "14px", objectFit: "cover", borderRadius: "2px" }} />
-            <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 700, color: dark ? T.color.n400 : T.color.n500 }}>+1</span>
+            <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 700, color: T.color.n500 }}>+1</span>
           </div>
           <input type="tel" placeholder="(555) 123-4567" value={phone}
             onChange={e => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
             onFocus={() => setFocus("phone")} onBlur={() => { setFocus(null); setPhoneTouched(true); }}
             onKeyDown={e => { if (e.key === "Enter" && allValid) submit(); }}
-            style={{ flex: 1, padding: "16px 14px", border: "none", outline: "none", fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: dark ? "#fff" : T.color.n900, background: "transparent", minWidth: 0 }}
+            style={{ flex: 1, padding: "16px 14px", border: "none", outline: "none", fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: T.color.n900, background: "transparent", minWidth: 0 }}
           />
           {phoneTouched && digits.length > 0 && (
             <div style={{ display: "flex", alignItems: "center", paddingRight: "14px" }}>
@@ -231,8 +231,8 @@ function CaptureForm({ dark }) {
 
       {/* Opt-in checkbox */}
       <div style={{
-        background: dark ? "rgba(255,255,255,0.04)" : T.color.n50,
-        border: `1px solid ${dark ? "rgba(255,255,255,0.08)" : T.color.n200}`,
+        background: T.color.n50,
+        border: `1px solid ${T.color.n200}`,
         borderRadius: T.radius.lg,
         padding: "14px 16px",
         marginBottom: "20px",
@@ -241,15 +241,15 @@ function CaptureForm({ dark }) {
           onClick={() => setOptIn(!optIn)}>
           <div style={{
             width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0, marginTop: "1px",
-            border: `2px solid ${optIn ? T.color.red500 : dark ? "rgba(255,255,255,0.3)" : T.color.n300}`,
-            background: optIn ? T.color.red500 : dark ? "rgba(0,0,0,0.2)" : T.color.n0,
+            border: `2px solid ${optIn ? T.color.red500 : T.color.n300}`,
+            background: optIn ? T.color.red500 : T.color.n0,
             display: "flex", alignItems: "center", justifyContent: "center",
             transition: `all ${T.tr.fast}`,
             boxShadow: optIn ? "0 2px 8px rgba(249,58,37,0.3)" : "none",
           }}>
             {optIn && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
           </div>
-          <span style={{ fontFamily: T.font.display, fontSize: "13px", lineHeight: 1.5, color: dark ? "rgba(255,255,255,0.6)" : T.color.n500 }}>
+          <span style={{ fontFamily: T.font.display, fontSize: "13px", lineHeight: 1.5, color: T.color.n500 }}>
             I agree to receive exclusive deal alerts and promotions via RCS/SMS. Message & data rates may apply. Reply STOP to unsubscribe anytime.
           </span>
         </label>
@@ -261,8 +261,8 @@ function CaptureForm({ dark }) {
         border: "none",
         borderRadius: T.radius.lg, fontFamily: T.font.display, fontWeight: 700,
         fontSize: "16px", letterSpacing: "0.03em",
-        background: allValid && !loading ? "linear-gradient(135deg, #F93A25 0%, #E0311F 100%)" : dark ? "rgba(255,255,255,0.08)" : T.color.n200,
-        color: allValid && !loading ? "#FFFFFF" : dark ? "rgba(255,255,255,0.3)" : T.color.n400,
+        background: allValid && !loading ? "linear-gradient(135deg, #F93A25 0%, #E0311F 100%)" : T.color.n200,
+        color: allValid && !loading ? "#FFFFFF" : T.color.n400,
         cursor: allValid && !loading ? "pointer" : "default",
         transition: "all 250ms ease",
         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
@@ -279,7 +279,7 @@ function CaptureForm({ dark }) {
         </div>
       )}
 
-      <div style={{ fontFamily: T.font.display, fontSize: "12px", color: dark ? "rgba(255,255,255,0.35)" : T.color.n400, marginTop: "14px", textAlign: "center" }}>Free forever. No spam. Unsubscribe anytime.</div>
+      <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "14px", textAlign: "center" }}>Free forever. No spam. Unsubscribe anytime.</div>
     </div>
   );
 }
