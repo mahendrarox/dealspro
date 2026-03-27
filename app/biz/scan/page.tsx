@@ -2,12 +2,26 @@
 
 import { useState } from "react";
 
+type DropItem = {
+  id: string;
+  title: string;
+  restaurant_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  price: number;
+  original_price: number;
+  redemption_valid_until: string;
+};
+
 type Order = {
   id: string;
   drop_title: string;
   restaurant_name: string;
+  drop_item_id?: string;
   price_paid: number;
   status: string;
+  redemption_status?: string;
   qr_token: string;
   created_at: string;
   redeemed_at?: string;
@@ -16,6 +30,7 @@ type Order = {
 export default function ScanPage() {
   const [token, setToken] = useState("");
   const [order, setOrder] = useState<Order | null>(null);
+  const [dropItem, setDropItem] = useState<DropItem | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
@@ -27,6 +42,7 @@ export default function ScanPage() {
     setLoading(true);
     setError("");
     setOrder(null);
+    setDropItem(null);
     setRedeemed(false);
     setRedeemError("");
 
@@ -37,7 +53,8 @@ export default function ScanPage() {
         setError(data.error || "Order not found");
       } else {
         setOrder(data.order);
-        if (data.order.status === "redeemed") setRedeemed(true);
+        if (data.dropItem) setDropItem(data.dropItem);
+        if (data.order.redemption_status === "redeemed" || data.order.status === "redeemed") setRedeemed(true);
       }
     } catch {
       setError("Network error. Please try again.");
@@ -106,7 +123,7 @@ export default function ScanPage() {
             letterSpacing: "-0.02em",
           }}
         >
-          Redeem a Ticket
+          Redeem a Deal Card
         </h1>
         <p style={{ fontSize: "14px", color: "#52525B", marginTop: "6px" }}>
           Enter the token from the customer&apos;s QR code
@@ -245,7 +262,8 @@ export default function ScanPage() {
           {/* Order Info */}
           <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "12px" }}>
             <ScanDetailRow label="Amount Paid" value={`$${Number(order.price_paid).toFixed(2)}`} />
-            <ScanDetailRow label="Pickup Window" value="6–8 PM" />
+            {dropItem && <ScanDetailRow label="Date" value={dropItem.date} />}
+            <ScanDetailRow label="Pickup Window" value={dropItem ? `${dropItem.start_time.replace(/^0/, "")}–${dropItem.end_time.replace(/^0/, "")}` : "TBD"} />
             <ScanDetailRow
               label="Order ID"
               value={order.id.slice(0, 8) + "..."}
@@ -281,7 +299,7 @@ export default function ScanPage() {
                   boxSizing: "border-box",
                 }}
               >
-                ✓ Ticket Successfully Redeemed
+                ✓ Deal Card Successfully Redeemed
               </div>
             ) : (
               <button

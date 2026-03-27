@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { supabase } from "@/lib/supabase";
+import { getDropItem, formatTimeWindow, formatDate, isRedemptionValid } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export default async function TicketPage({
     notFound();
   }
 
+  const item = order.drop_item_id ? getDropItem(order.drop_item_id) : null;
   const ticketUrl = `${process.env.NEXT_PUBLIC_APP_URL}/ticket/${token}`;
   const qrDataUrl = await QRCode.toDataURL(ticketUrl, {
     width: 240,
@@ -29,7 +31,35 @@ export default async function TicketPage({
   });
 
   const isPaid = order.status === "paid";
-  const isRedeemed = order.status === "redeemed";
+  const isRedeemed = order.redemption_status === "redeemed";
+  const expired = item ? !isRedemptionValid(item) : false;
+  const pickupWindow = item ? formatTimeWindow(item) : "TBD";
+  const dateStr = item ? formatDate(item) : "";
+  const validUntil = item?.redemption_valid_until
+    ? new Date(item.redemption_valid_until).toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })
+    : null;
+
+  // Determine status
+  let statusText = "";
+  let statusBg = "#DCFCE7";
+  let statusColor = "#16A34A";
+  if (expired && !isRedeemed) {
+    statusText = "Expired";
+    statusBg = "#FEE2E0";
+    statusColor = "#F93A25";
+  } else if (isRedeemed) {
+    statusText = "✓ Redeemed";
+    statusBg = "#E4E4E7";
+    statusColor = "#A1A1AA";
+  } else if (isPaid) {
+    statusText = "✓ Paid · Ready to Use";
+  } else {
+    statusText = order.status;
+  }
 
   return (
     <div
@@ -73,7 +103,7 @@ export default async function TicketPage({
               marginBottom: "8px",
             }}
           >
-            DealsPro Drop
+            Your Deal Card
           </div>
           <div
             style={{
@@ -89,16 +119,15 @@ export default async function TicketPage({
           <div style={{ fontSize: "14px", color: "#A1A1AA", marginTop: "6px" }}>
             {order.restaurant_name}
           </div>
+          {dateStr && (
+            <div style={{ fontSize: "13px", color: "#A1A1AA", marginTop: "4px" }}>
+              📅 {dateStr} · {pickupWindow}
+            </div>
+          )}
         </div>
 
         {/* Status Badge */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            padding: "16px 24px 0",
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "center", padding: "16px 24px 0" }}>
           <span
             style={{
               fontFamily: "'JetBrains Mono', monospace",
@@ -108,11 +137,11 @@ export default async function TicketPage({
               textTransform: "uppercase",
               padding: "6px 16px",
               borderRadius: "9999px",
-              background: isRedeemed ? "#E4E4E7" : "#DCFCE7",
-              color: isRedeemed ? "#A1A1AA" : "#16A34A",
+              background: statusBg,
+              color: statusColor,
             }}
           >
-            {isRedeemed ? "✓ Redeemed" : isPaid ? "✓ Paid · Ready to Use" : order.status}
+            {statusText}
           </span>
         </div>
 
@@ -131,7 +160,8 @@ export default async function TicketPage({
               background: "#FFFFFF",
               borderRadius: "16px",
               border: "2px solid #E4E4E7",
-              opacity: isRedeemed ? 0.4 : 1,
+              opacity: isRedeemed || expired ? 0.4 : 1,
+              position: "relative",
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -142,17 +172,40 @@ export default async function TicketPage({
               height={240}
               style={{ display: "block" }}
             />
+            {(isRedeemed || expired) && (
+              <div style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(255,255,255,0.7)",
+                borderRadius: "16px",
+              }}>
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: "14px",
+                  fontWeight: 800,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: isRedeemed ? "#A1A1AA" : "#F93A25",
+                  background: "rgba(255,255,255,0.9)",
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                }}>
+                  {isRedeemed ? "REDEEMED" : "EXPIRED"}
+                </span>
+              </div>
+            )}
           </div>
           {isRedeemed && (
-            <div
-              style={{
-                marginTop: "12px",
-                fontSize: "13px",
-                color: "#A1A1AA",
-                textAlign: "center",
-              }}
-            >
-              This ticket has already been redeemed.
+            <div style={{ marginTop: "12px", fontSize: "13px", color: "#A1A1AA", textAlign: "center" }}>
+              This deal card has already been redeemed.
+            </div>
+          )}
+          {expired && !isRedeemed && (
+            <div style={{ marginTop: "12px", fontSize: "13px", color: "#F93A25", textAlign: "center" }}>
+              This deal card has expired.
             </div>
           )}
         </div>
@@ -168,12 +221,9 @@ export default async function TicketPage({
           }}
         >
           <DetailRow label="Restaurant" value={order.restaurant_name} />
-          <DetailRow label="Pickup Window" value="6–8 PM" />
-          <DetailRow
-            label="Amount Paid"
-            value={`$${Number(order.price_paid).toFixed(2)}`}
-            highlight
-          />
+          {dateStr && <DetailRow label="Date" value={dateStr} />}
+          <DetailRow label="Pickup Window" value={pickupWindow} />
+          <DetailRow label="Amount Paid" value={`$${Number(order.price_paid).toFixed(2)}`} highlight />
           {isRedeemed && order.redeemed_at && (
             <DetailRow
               label="Redeemed At"
@@ -198,22 +248,20 @@ export default async function TicketPage({
             borderTop: "1px solid #E4E4E7",
           }}
         >
-          Show this QR code to staff at the restaurant to redeem.
+          {expired
+            ? "This deal card has expired."
+            : isRedeemed
+            ? "This deal card has been redeemed. Thank you!"
+            : validUntil
+            ? `Show this deal card to staff. Valid until ${validUntil} at 11:59 PM.`
+            : "Show this deal card to staff at the restaurant to redeem."}
         </div>
       </div>
     </div>
   );
 }
 
-function DetailRow({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
+function DetailRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
       <span style={{ fontSize: "13px", color: "#52525B" }}>{label}</span>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import twilio from "twilio";
 import { supabase } from "@/lib/supabase";
-import { HARDCODED_DROP } from "@/lib/constants";
+import { normalizePhone } from "@/lib/phone";
 
 const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID!,
@@ -25,13 +25,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  // Normalize phone to E.164 (+1XXXXXXXXXX)
-  const digits = phone.replace(/\D/g, "");
-  const e164Phone = digits.startsWith("1") ? `+${digits}` : `+1${digits}`;
+  const e164Phone = normalizePhone(phone);
   console.log("[Lead] Normalized phone:", e164Phone);
 
   // Upsert user into Supabase
-  console.log("[Lead] Upserting user:", { name: name.trim(), phone: e164Phone });
   const { data: user, error: userError } = await supabase
     .from("users")
     .upsert(
@@ -52,18 +49,16 @@ export async function POST(request: NextRequest) {
   }
   console.log("[Lead] User upserted, id:", user.id);
 
-  // Send SMS via Twilio
+  // Send SMS with link to deals
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  const claimUrl = `${appUrl}/deal/${HARDCODED_DROP.id}?uid=${user.id}`;
+  const dealsUrl = `${appUrl}/#deals`;
   const message =
-    `Hey ${name.trim()}! Your DealsPro drop is ready.\n` +
-    `${HARDCODED_DROP.title} - $${(HARDCODED_DROP.price_cents / 100).toFixed(2)} (50% OFF)\n` +
-    `Pickup ${HARDCODED_DROP.pickup_window}\n` +
-    `Claim here: ${claimUrl}`;
+    `Hey ${name.trim()}! Welcome to DealsPro 🔥\n\n` +
+    `This week's exclusive restaurant drops are live.\n` +
+    `Browse deals: ${dealsUrl}\n\n` +
+    `Reply STOP to unsubscribe.`;
 
   console.log("📩 Sending SMS to:", e164Phone);
-  console.log("📨 Message:", message);
-
   try {
     await twilioClient.messages.create({
       body: message,
@@ -73,8 +68,7 @@ export async function POST(request: NextRequest) {
     console.log("✅ SMS sent successfully");
   } catch (error) {
     console.error("❌ SMS error:", error);
-    // Don't fail the request — user is saved, SMS is best-effort
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, user_id: user.id });
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { getDropItem, isRedemptionValid } from "@/lib/constants";
 
 export async function POST(request: NextRequest) {
   const { token } = await request.json();
@@ -19,14 +20,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  if (order.status === "redeemed") {
+  // Check redemption status (not order status)
+  if (order.redemption_status === "redeemed") {
     console.log("[Redeem] Already redeemed:", token);
     return NextResponse.json({ error: "Already redeemed", order }, { status: 409 });
   }
 
+  // Check redemption window
+  const dropItem = order.drop_item_id ? getDropItem(order.drop_item_id) : null;
+  if (dropItem && !isRedemptionValid(dropItem)) {
+    console.log("[Redeem] Redemption expired for:", token);
+    return NextResponse.json({ error: "This deal card has expired" }, { status: 400 });
+  }
+
   const { data: updated, error: updateError } = await supabase
     .from("orders")
-    .update({ status: "redeemed", redeemed_at: new Date().toISOString() })
+    .update({
+      redemption_status: "redeemed",
+      redeemed_at: new Date().toISOString(),
+    })
     .eq("qr_token", token)
     .select()
     .single();
@@ -37,5 +49,5 @@ export async function POST(request: NextRequest) {
   }
 
   console.log("[Redeem] Redemption confirmed for token:", token);
-  return NextResponse.json({ success: true, order: updated });
+  return NextResponse.json({ success: true, order: updated, dropItem });
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { DROP_ITEMS, type DropItem, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
+import type { SpotsInfo } from "@/lib/spots";
 
 const T = {
   color: {
@@ -123,7 +125,14 @@ function CaptureForm({ dark }) {
       });
       const data = await res.json();
       if (data.success) {
+        // Store phone in localStorage for deal page checkout
+        try { localStorage.setItem("dp_phone", `+1${digits}`); } catch {}
         setDone(true);
+        // Auto-scroll to deals after brief delay
+        setTimeout(() => {
+          const el = document.getElementById("deals");
+          if (el) el.scrollIntoView({ behavior: "smooth" });
+        }, 2000);
       } else {
         setSubmitError(data.error || "Something went wrong. Please try again.");
         setLoading(false);
@@ -284,33 +293,51 @@ function CaptureForm({ dark }) {
   );
 }
 
-function DealCard({ deal, delay = 0 }) {
+function DropCard({ item, spots, delay = 0 }: { item: DropItem; spots?: SpotsInfo; delay?: number }) {
   const [h, setH] = useState(false);
   const [ref, vis] = useInView();
-  const sold = deal.status === "sold-out";
-  const pct = Math.round((1 - deal.dealPrice / deal.originalPrice) * 100);
+  const remaining = spots?.remaining ?? item.total_spots;
+  const claimed = spots?.claimed ?? 0;
+  const sold = remaining <= 0;
+  const ended = hasEnded(item);
+  const pickupActive = isPickupInProgress(item);
+  const purchasable = canPurchase(item) && !sold;
+  const pct = getDiscountPct(item);
+  const timeCtx = getTimeContext(item);
+  const disabled = sold || ended || pickupActive;
+
+  let statusText = "";
+  let statusColor = T.color.amber500;
+  if (ended) { statusText = "This drop has ended"; statusColor = T.color.n400; }
+  else if (pickupActive) { statusText = "Ordering closed · Pickup in progress"; statusColor = T.color.n400; }
+  else if (sold) { statusText = "All spots claimed"; statusColor = T.color.n400; }
+  else { statusText = remaining <= 3 ? `🔥 Only ${remaining} left` : `🔥 ${claimed} claimed`; }
+
   return (
+    <a href={`/deal/${item.id}`} style={{ textDecoration: "none", display: "block" }}>
     <div ref={ref} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: sold ? T.shadow.sm : h ? T.shadow.dealHover : T.shadow.deal, transform: h && !sold ? "translateY(-4px)" : "none", transition: `all ${T.tr.spring}`, opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", position: "relative", filter: sold ? "grayscale(0.3)" : "none" }}>
+      style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: disabled ? T.shadow.sm : h ? T.shadow.dealHover : T.shadow.deal, transform: h && !disabled ? "translateY(-4px)" : "none", transition: `all ${T.tr.spring}`, opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", position: "relative", filter: disabled ? "grayscale(0.3)" : "none", cursor: "pointer" }}>
       <div style={{ background: `linear-gradient(135deg, ${T.color.n950}, ${T.color.n800})`, padding: "20px", position: "relative" }}>
-        {sold && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}><span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 800, letterSpacing: "0.15em", color: T.color.n400, textTransform: "uppercase", background: "rgba(0,0,0,0.6)", padding: "8px 20px", borderRadius: T.radius.full }}>SOLD OUT</span></div>}
+        {sold && !ended && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}><span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 800, letterSpacing: "0.15em", color: T.color.n400, textTransform: "uppercase", background: "rgba(0,0,0,0.6)", padding: "8px 20px", borderRadius: T.radius.full }}>SOLD OUT</span></div>}
         <Badge>DROP</Badge>
-        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: "#fff", marginTop: "12px" }}>{deal.restaurant}</div>
-        <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, marginTop: "4px" }}>{deal.cuisine} · {deal.distance}</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: "#fff", marginTop: "12px" }}>{item.title}</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
+        <div style={{ fontFamily: T.font.mono, fontSize: "11px", color: T.color.n400, marginTop: "6px" }}>⏰ {formatTimeWindow(item)}</div>
       </div>
       <div style={{ padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: T.font.mono, fontSize: "36px", fontWeight: 800, color: T.color.red500, lineHeight: 1 }}>${deal.dealPrice}</span>
-          <span style={{ fontFamily: T.font.mono, fontSize: "18px", color: T.color.n400, textDecoration: "line-through" }}>${deal.originalPrice}</span>
+          <span style={{ fontFamily: T.font.mono, fontSize: "36px", fontWeight: 800, color: T.color.red500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
+          <span style={{ fontFamily: T.font.mono, fontSize: "18px", color: T.color.n400, textDecoration: "line-through" }}>${item.original_price.toFixed(2)}</span>
           <Badge type="savings">{pct}% OFF</Badge>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: sold ? T.color.n400 : T.color.amber500 }}>{sold ? "All claimed this week" : `🔥 Only ${deal.remaining} left`}</span>
-          {!sold && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.red500, background: T.color.red50, padding: "4px 10px", borderRadius: T.radius.full }}>{deal.expiresIn}</span>}
+          <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: statusColor }}>{statusText}</span>
+          {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.red500, background: T.color.red50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
         </div>
-        <Btn full disabled={sold}>{sold ? "Sold Out" : "Grab This Drop"}</Btn>
+        <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : sold ? "Sold Out" : "Ordering Closed") : `Claim Spot for $${item.price.toFixed(2)}`}</Btn>
       </div>
     </div>
+    </a>
   );
 }
 
@@ -323,15 +350,25 @@ const Icon = {
   close: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
 };
 
-const deals = [
-  { id: 1, restaurant: "Sakura Ramen House", cuisine: "Japanese", distance: "0.3mi", originalPrice: 50, dealPrice: 25, remaining: 5, expiresIn: "2h 14m", status: "active" },
-  { id: 2, restaurant: "Tandoori Nights", cuisine: "Indian", distance: "1.2mi", originalPrice: 40, dealPrice: 20, remaining: 8, expiresIn: "5h 30m", status: "active" },
-  { id: 3, restaurant: "Bella Napoli", cuisine: "Italian", distance: "0.8mi", originalPrice: 60, dealPrice: 30, remaining: 0, expiresIn: "0h 0m", status: "sold-out" },
-];
-
 export default function App() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [spots, setSpots] = useState<Record<string, SpotsInfo>>({});
+
+  const fetchSpots = useCallback(async () => {
+    try {
+      const res = await fetch("/api/spots");
+      const data = await res.json();
+      if (data.spots) setSpots(data.spots);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    fetchSpots();
+    const iv = setInterval(fetchSpots, 30000);
+    return () => clearInterval(iv);
+  }, [fetchSpots]);
+
   useEffect(() => { const fn = () => setScrolled(window.scrollY > 60); window.addEventListener("scroll", fn, { passive: true }); return () => window.removeEventListener("scroll", fn); }, []);
 
   const SH = ({ label, title, dark, center = true }) => { const [r, v] = useInView(); return (<div ref={r} style={{ textAlign: center ? "center" : "left", marginBottom: "48px", opacity: v ? 1 : 0, animation: v ? "fadeUp 0.5s ease both" : "none" }}><div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: T.color.red500, marginBottom: "12px" }}>{label}</div><h2 style={{ fontFamily: T.font.display, fontSize: "clamp(24px, 4vw, 36px)", fontWeight: 700, lineHeight: 1.2, letterSpacing: "-0.02em", color: dark ? "#fff" : T.color.n900 }}>{title}</h2></div>); };
@@ -364,7 +401,7 @@ export default function App() {
             <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Exclusive limited-time deals from top local restaurants — released weekly in small batches. Once they're claimed, they're gone. No app required.</p>
             <CaptureForm dark />
           </div>
-          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DealCard deal={deals[0]} /></div></div>
+          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={DROP_ITEMS[0]} spots={spots[DROP_ITEMS[0].id]} /></div></div>
         </div>
       </section>
 
@@ -372,7 +409,7 @@ export default function App() {
       <section id="how-it-works" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="How It Works" title="Three Steps to Exclusive Deals" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "24px" }}>{[{ icon: Icon.phone, t: "Enter Your Name & Phone", d: "Sign up in 10 seconds. No app to download, no account to create." },{ icon: Icon.msg, t: "Get Weekly Deals", d: "Exclusive limited-time deals from local restaurants, delivered via text every week." },{ icon: Icon.qr, t: "Pay & Redeem", d: "Prepay online at the deal price. Show your QR code at the restaurant." }].map((s, i) => { const [r, v] = useInView(); return (<div key={i} ref={r} style={{ textAlign: "center", padding: "32px 24px", borderRadius: T.radius.xl, border: `1px solid ${T.color.n200}`, opacity: v ? 1 : 0, animation: v ? `fadeUp 0.5s ease ${i * 120}ms both` : "none" }}><div style={{ width: "60px", height: "60px", borderRadius: T.radius.xl, background: T.color.red50, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>{s.icon}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.red500, letterSpacing: "0.1em", marginBottom: "8px" }}>STEP {i + 1}</div><h3 style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "8px" }}>{s.t}</h3><p style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.6, color: T.color.n500 }}>{s.d}</p></div>); })}</div></div></section>
 
       {/* FEATURED DEALS */}
-      <section id="featured-deals" style={{ padding: "80px 20px", background: T.color.n50 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="This Week's Drops" title="Deals Going Fast" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px" }}>{deals.map((d, i) => <DealCard key={d.id} deal={d} delay={i * 120} />)}</div></div></section>
+      <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="This Week's Drops" title="Deals Going Fast" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px" }}>{DROP_ITEMS.map((item, i) => <DropCard key={item.id} item={item} spots={spots[item.id]} delay={i * 120} />)}</div></div></section>
 
       {/* FOR RESTAURANTS */}
       <section id="for-restaurants" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="For Restaurants" title="Fill Empty Tables Without Discounting Your Brand" />{(() => { const [r, v] = useInView(); return (<div ref={r} className="rg" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px", alignItems: "center", opacity: v ? 1 : 0, animation: v ? "fadeUp 0.5s ease both" : "none" }}><div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>{["Limited to 20 deals per week — no Groupon floods", "Customers prepay — guaranteed revenue before they walk in", "Accept or decline each deal via text — full control", "No POS changes. No hardware. No setup fee."].map((p, i) => (<div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}><div style={{ width: "26px", height: "26px", borderRadius: "50%", background: T.color.green50, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "2px" }}>{Icon.check}</div><span style={{ fontFamily: T.font.display, fontSize: "15px", lineHeight: 1.5, color: T.color.n900, fontWeight: 500 }}>{p}</span></div>))}<div style={{ marginTop: "8px" }}><a href="mailto:sales@dealspro.ai?subject=Restaurant%20Partnership%20Inquiry" style={{ textDecoration: "none" }}><Btn>Partner With Us →</Btn></a></div></div><div style={{ background: T.color.n50, borderRadius: T.radius.xxl, padding: "28px 20px", border: `1px solid ${T.color.n200}` }}><div style={{ fontFamily: T.font.mono, fontSize: "10px", fontWeight: 700, color: T.color.n400, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "16px", textAlign: "center" }}>SMS CONFIRMATION FLOW</div>{[{ from: "sys", text: "🔔 New DealsPro order!\n\nCustomer: Sarah M.\nDeal: $50 for $25\n\nReply ACCEPT or DECLINE" },{ from: "rest", text: "ACCEPT" },{ from: "sys", text: "✅ Confirmed! Sarah has been notified and will receive her QR code." }].map((m, i) => (<div key={i} style={{ display: "flex", justifyContent: m.from === "rest" ? "flex-end" : "flex-start", marginBottom: "10px" }}><div style={{ maxWidth: "85%", padding: "10px 14px", borderRadius: "14px", background: m.from === "rest" ? T.color.red500 : T.color.n0, color: m.from === "rest" ? "#fff" : T.color.n900, fontFamily: T.font.display, fontSize: "12px", lineHeight: 1.5, whiteSpace: "pre-line", boxShadow: T.shadow.sm, border: m.from === "sys" ? `1px solid ${T.color.n200}` : "none" }}>{m.text}</div></div>))}</div></div>); })()}</div></section>
@@ -384,7 +421,7 @@ export default function App() {
       <section id="get-deals" style={{ background: `linear-gradient(135deg, ${T.color.red500} 0%, ${T.color.n950} 100%)`, padding: "80px 20px", textAlign: "center" }}><div style={{ maxWidth: "520px", margin: "0 auto" }}><h2 style={{ fontFamily: T.font.display, fontSize: "clamp(26px, 4vw, 36px)", fontWeight: 800, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.02em", marginBottom: "12px" }}>Don't Miss the Next Drop</h2><p style={{ fontFamily: T.font.display, fontSize: "16px", color: "rgba(255,255,255,0.7)", marginBottom: "32px", lineHeight: 1.5 }}>Exclusive limited-time restaurant deals drop every week. Limited spots. Be the first to know.</p><div style={{ display: "flex", justifyContent: "center" }}><CaptureForm dark /></div><div style={{ fontFamily: T.font.display, fontSize: "13px", color: "rgba(255,255,255,0.5)", marginTop: "24px" }}>Join 500+ DFW foodies already saving</div></div></section>
 
       {/* FOOTER */}
-      <footer style={{ background: T.color.n950, padding: "48px 20px 32px", borderTop: `1px solid ${T.color.n800}` }}><div className="fg" style={{ maxWidth: "1120px", margin: "0 auto", display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "40px" }}><div><div style={{ marginBottom: "12px" }}><DPLogo size={32} dark /></div><p style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, lineHeight: 1.6, maxWidth: "260px" }}>Exclusive restaurant deals, limited weekly drops, delivered to your phone.</p></div>{[{ t: "Platform", l: [{n:"How It Works",h:"#how-it-works"},{n:"Featured Deals",h:"#featured-deals"},{n:"For Restaurants",h:"#for-restaurants"},{n:"For Creators",h:"#for-creators"}] },{ t: "Company", l: [{n:"About",h:"#how-it-works"},{n:"Contact",h:"mailto:sales@dealspro.ai"},] },{ t: "Legal", l: [{n:"Terms of Service",h:"/terms"},{n:"Privacy Policy",h:"/privacy"},{n:"Opt-In Policy",h:"/opt-in"},{n:"Opt-Out Policy",h:"/opt-out"},{n:"Cookies",h:"/cookies"}] }].map(c => (<div key={c.t}><div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, color: T.color.n400, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "14px" }}>{c.t}</div>{c.l.map(l => <a key={l.n} href={l.h} style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, textDecoration: "none", marginBottom: "8px" }}>{l.n}</a>)}</div>))}</div><div style={{ maxWidth: "1120px", margin: "36px auto 0", paddingTop: "20px", borderTop: `1px solid ${T.color.n800}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}><span style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400 }}>© 2026 DealsPro. All rights reserved.</span><div style={{ display: "flex", gap: "16px" }}>{["Twitter", "Instagram", "TikTok"].map(s => <a key={s} href="#" style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, textDecoration: "none" }}>{s}</a>)}</div></div></footer>
+      <footer style={{ background: T.color.n950, padding: "48px 20px 32px", borderTop: `1px solid ${T.color.n800}` }}><div className="fg" style={{ maxWidth: "1120px", margin: "0 auto", display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "40px" }}><div><div style={{ marginBottom: "12px" }}><DPLogo size={32} dark /></div><p style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, lineHeight: 1.6, maxWidth: "260px" }}>Exclusive restaurant deals, limited weekly drops, delivered to your phone.</p></div>{[{ t: "Platform", l: [{n:"How It Works",h:"#how-it-works"},{n:"Featured Deals",h:"#deals"},{n:"For Restaurants",h:"#for-restaurants"},{n:"For Creators",h:"#for-creators"}] },{ t: "Company", l: [{n:"About",h:"#how-it-works"},{n:"Contact",h:"mailto:sales@dealspro.ai"},] },{ t: "Legal", l: [{n:"Terms of Service",h:"/terms"},{n:"Privacy Policy",h:"/privacy"},{n:"Opt-In Policy",h:"/opt-in"},{n:"Opt-Out Policy",h:"/opt-out"},{n:"Cookies",h:"/cookies"}] }].map(c => (<div key={c.t}><div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, color: T.color.n400, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "14px" }}>{c.t}</div>{c.l.map(l => <a key={l.n} href={l.h} style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, textDecoration: "none", marginBottom: "8px" }}>{l.n}</a>)}</div>))}</div><div style={{ maxWidth: "1120px", margin: "36px auto 0", paddingTop: "20px", borderTop: `1px solid ${T.color.n800}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}><span style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400 }}>© 2026 DealsPro. All rights reserved.</span><div style={{ display: "flex", gap: "16px" }}>{["Twitter", "Instagram", "TikTok"].map(s => <a key={s} href="#" style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, textDecoration: "none" }}>{s}</a>)}</div></div></footer>
     </div>
   );
 }
