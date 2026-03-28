@@ -2,52 +2,70 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getDropItem, isRedemptionValid } from "@/lib/constants";
 
+// ── Structured logging ──────────────────────────────────────────────
+function log(event: string, data: Record<string, unknown>) {
+  console.log(JSON.stringify({ event: "redeem", action: event, timestamp: new Date().toISOString(), ...data }));
+}
+
 export async function POST(request: NextRequest) {
   const { token } = await request.json();
 
   if (!token) {
+    log("missing_token", {});
     return NextResponse.json({ error: "Token required" }, { status: 400 });
   }
 
-  const { data: order, error } = await supabase
+  log("redeem_requested", { qr_token: token });
+
+  // Check redemption window before attempting atomic update
+  const { data: orderCheck } = await supabase
     .from("orders")
-    .select("*")
+    .select("drop_item_id")
     .eq("qr_token", token)
     .single();
 
-  if (error || !order) {
-    console.log("[Redeem] Order not found for token:", token);
+  if (!orderCheck) {
+    log("not_found", { qr_token: token });
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  // Check redemption status (not order status)
-  if (order.redemption_status === "redeemed") {
-    console.log("[Redeem] Already redeemed:", token);
-    return NextResponse.json({ error: "Already redeemed", order }, { status: 409 });
-  }
-
-  // Check redemption window
-  const dropItem = order.drop_item_id ? getDropItem(order.drop_item_id) : null;
+  const dropItem = orderCheck.drop_item_id ? getDropItem(orderCheck.drop_item_id) : null;
   if (dropItem && !isRedemptionValid(dropItem)) {
-    console.log("[Redeem] Redemption expired for:", token);
+    log("expired", { qr_token: token, drop_item_id: orderCheck.drop_item_id });
     return NextResponse.json({ error: "This deal card has expired" }, { status: 400 });
   }
 
-  const { data: updated, error: updateError } = await supabase
-    .from("orders")
-    .update({
-      redemption_status: "redeemed",
-      redeemed_at: new Date().toISOString(),
-    })
-    .eq("qr_token", token)
-    .select()
-    .single();
+  // Atomic redemption — only one request can change pending → redeemed
+  const { data: rpcResult, error: rpcError } = await supabase.rpc("redeem_order_atomic", {
+    p_qr_token: token,
+  });
 
-  if (updateError) {
-    console.error("[Redeem] Update failed:", updateError);
-    return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  if (rpcError) {
+    log("rpc_error", { qr_token: token, error: rpcError.message });
+    return NextResponse.json({ error: "Redemption failed" }, { status: 500 });
   }
 
-  console.log("[Redeem] Redemption confirmed for token:", token);
-  return NextResponse.json({ success: true, order: updated, dropItem });
+  const status = rpcResult?.status;
+
+  if (status === "not_found") {
+    log("not_found", { qr_token: token });
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+
+  if (status === "already_redeemed") {
+    log("already_redeemed", { qr_token: token, drop_item_id: orderCheck.drop_item_id });
+    return NextResponse.json({
+      error: "Already redeemed",
+      order: rpcResult.order,
+      dropItem,
+    }, { status: 409 });
+  }
+
+  // status === "redeemed"
+  log("redeemed", { qr_token: token, drop_item_id: orderCheck.drop_item_id, order_id: rpcResult.order?.id });
+  return NextResponse.json({
+    success: true,
+    order: rpcResult.order,
+    dropItem,
+  });
 }
