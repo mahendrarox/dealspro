@@ -10,6 +10,7 @@ interface SuccessClientProps {
     restaurant_name: string;
     price_paid: number;
     qr_token: string;
+    quantity?: number;
   } | null;
   qrDataUrl: string | null;
   savings: string;
@@ -17,15 +18,27 @@ interface SuccessClientProps {
   dealCardUrl: string | null;
   date?: string | null;
   redemptionValidUntil?: string | null;
+  quantity?: number;
+  startTime?: string | null;
 }
 
-export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow, dealCardUrl, date, redemptionValidUntil }: SuccessClientProps) {
+export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow, dealCardUrl, date, redemptionValidUntil, quantity: propQty, startTime }: SuccessClientProps) {
   const [showContent, setShowContent] = useState(false);
   const [polling, setPolling] = useState(!order);
   const [currentOrder, setCurrentOrder] = useState(order);
   const [currentQr, setCurrentQr] = useState(qrDataUrl);
   const [currentUrl, setCurrentUrl] = useState(dealCardUrl);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const pollCount = useRef(0);
+
+  const qty = currentOrder?.quantity ?? propQty ?? 1;
+
+  // Debug: log initial props
+  useEffect(() => {
+    console.log("[SuccessClient] Mount — order from SSR:", order ? "YES" : "NULL", "polling:", !order);
+    if (order) console.log("[SuccessClient] SSR order:", JSON.stringify(order));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setShowContent(true), 100);
@@ -33,25 +46,60 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
   }, []);
 
   useEffect(() => {
-    if (currentOrder || !polling) return;
+    if (currentOrder) {
+      console.log("[SuccessClient] Order is set — skipping poll. Title:", currentOrder.drop_title);
+      return;
+    }
+    if (!polling) {
+      console.log("[SuccessClient] Polling disabled");
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("session_id");
-    if (!sessionId) { setPolling(false); return; }
+    console.log("[SuccessClient] Starting poll with session_id:", sessionId);
+
+    if (!sessionId) {
+      console.log("[SuccessClient] No session_id in URL — stopping poll");
+      setPolling(false);
+      return;
+    }
+
     pollRef.current = setInterval(async () => {
+      pollCount.current += 1;
+      const attempt = pollCount.current;
       try {
-        const res = await fetch(`/api/order/poll?session_id=${sessionId}`);
+        const url = `/api/order/poll?session_id=${encodeURIComponent(sessionId)}`;
+        console.log(`[SuccessClient] Poll #${attempt} fetching:`, url);
+        const res = await fetch(url);
+        console.log(`[SuccessClient] Poll #${attempt} status:`, res.status);
+
         if (res.ok) {
           const data = await res.json();
+          console.log(`[SuccessClient] Poll #${attempt} response:`, JSON.stringify(data).slice(0, 200));
+
           if (data.order) {
+            console.log(`[SuccessClient] Poll #${attempt} — ORDER FOUND! Setting state...`);
             setCurrentOrder(data.order);
             setCurrentQr(data.qrDataUrl);
             setCurrentUrl(data.dealCardUrl);
             setPolling(false);
+            if (pollRef.current) clearInterval(pollRef.current);
+          } else {
+            console.log(`[SuccessClient] Poll #${attempt} — order is null, will retry...`);
           }
+        } else {
+          console.log(`[SuccessClient] Poll #${attempt} — non-OK status:`, res.status);
         }
-      } catch { /* keep polling */ }
+      } catch (err) {
+        console.error(`[SuccessClient] Poll #${attempt} — ERROR:`, err);
+      }
     }, 2000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+
+    return () => {
+      console.log("[SuccessClient] Cleanup — clearing interval");
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [currentOrder, polling]);
 
   const handleSave = () => {
@@ -70,7 +118,7 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
       try {
         await navigator.share({
           title: "Check out my DealsPro deal!",
-          text: currentOrder ? `I just grabbed ${currentOrder.drop_title} at ${currentOrder.restaurant_name} for $${Number(currentOrder.price_paid).toFixed(2)}!` : "Check out DealsPro!",
+          text: currentOrder ? `I just grabbed ${qty > 1 ? `${qty}x ` : ""}${currentOrder.drop_title} at ${currentOrder.restaurant_name} for $${Number(currentOrder.price_paid).toFixed(2)}!` : "Check out DealsPro!",
           url: currentUrl,
         });
       } catch { /* user cancelled */ }
@@ -83,6 +131,10 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
   const validDate = redemptionValidUntil
     ? new Date(redemptionValidUntil).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
     : null;
+
+  const titleDisplay = currentOrder
+    ? (qty > 1 ? `${qty}x ${currentOrder.drop_title}` : currentOrder.drop_title)
+    : "Loading...";
 
   return (
     <div style={{
@@ -153,7 +205,7 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
               gap: "8px",
             }}>
               <div style={{ fontSize: "18px", fontWeight: 700, color: "#18181B" }}>
-                {currentOrder?.drop_title ?? "Loading..."}
+                {titleDisplay}
               </div>
               <div style={{ fontSize: "14px", color: "#52525B" }}>
                 {currentOrder?.restaurant_name ?? ""}
@@ -161,6 +213,11 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
               {date && (
                 <div style={{ fontSize: "13px", color: "#52525B" }}>
                   {date} · {pickupWindow}
+                </div>
+              )}
+              {qty > 1 && (
+                <div style={{ fontSize: "13px", color: "#52525B" }}>
+                  Qty: {qty} plates
                 </div>
               )}
               <div style={{ fontSize: "14px", fontWeight: 600, color: "#18181B", fontFamily: F.mono }}>
@@ -191,9 +248,19 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
             <div style={{ marginTop: "12px", fontSize: "13px", color: "#52525B", textAlign: "center" }}>
               Show this to staff at {currentOrder?.restaurant_name ?? "the restaurant"}
             </div>
+            {qty > 1 && (
+              <div style={{ marginTop: "6px", fontSize: "12px", color: "#52525B", textAlign: "center", lineHeight: 1.4 }}>
+                All {qty} plates must be redeemed in one visit. No partial use.
+              </div>
+            )}
             {validDate && (
               <div style={{ marginTop: "4px", fontSize: "12px", color: "#A1A1AA", textAlign: "center" }}>
                 Valid until {validDate} at 11:59 PM
+              </div>
+            )}
+            {startTime && (
+              <div style={{ marginTop: "4px", fontSize: "12px", color: "#A1A1AA", textAlign: "center" }}>
+                Need to cancel? Contact support@dealspro.ai before {startTime.replace(/^0/, "")}
               </div>
             )}
           </div>
@@ -240,9 +307,9 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
           </a>
         </div>
 
-        {polling && (
+        {polling && !currentOrder && (
           <div style={{ textAlign: "center", marginTop: "16px", fontFamily: F.mono, fontSize: "12px", color: "#A1A1AA", letterSpacing: "0.05em" }}>
-            Confirming your deal card...
+            We&apos;re still confirming your deal card. Refresh in a moment or contact support.
           </div>
         )}
       </div>
