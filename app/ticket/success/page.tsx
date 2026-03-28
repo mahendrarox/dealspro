@@ -18,11 +18,19 @@ export default async function SuccessPage({
   let dropItemData = null;
 
   if (session_id) {
-    const { data } = await supabase
+    console.log("[success] Querying orders with stripe_session_id:", session_id);
+    const { data, error: queryError } = await supabase
       .from("orders")
-      .select("drop_item_id, drop_title, restaurant_name, price_paid, qr_token")
+      .select("drop_item_id, drop_title, restaurant_name, price_paid, qr_token, quantity")
       .eq("stripe_session_id", session_id)
-      .single();
+      .maybeSingle();
+
+    if (queryError) {
+      console.log("[success] Supabase error:", queryError.message);
+    }
+    if (!data) {
+      console.log("[success] No order found yet — will poll client-side");
+    }
 
     if (data?.qr_token) {
       order = data;
@@ -35,13 +43,16 @@ export default async function SuccessPage({
       if (data.drop_item_id) {
         const item = getDropItem(data.drop_item_id);
         if (item) {
+          const qty = data.quantity ?? 1;
           dropItemData = {
             date: formatDate(item),
             timeWindow: formatTimeWindow(item),
             redemptionValidUntil: item.redemption_valid_until,
-            savings: `$${getSavings(item).toFixed(2)}`,
+            savings: `$${(getSavings(item) * qty).toFixed(2)}`,
             title: item.title,
             restaurantName: item.restaurant_name,
+            quantity: qty,
+            startTime: item.start_time,
           };
         }
       }
@@ -61,6 +72,8 @@ export default async function SuccessPage({
       dealCardUrl={dealCardUrl}
       date={dropItemData?.date ?? null}
       redemptionValidUntil={dropItemData?.redemptionValidUntil ?? null}
+      quantity={dropItemData?.quantity ?? 1}
+      startTime={dropItemData?.startTime ?? null}
     />
   );
 }

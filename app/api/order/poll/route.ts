@@ -4,20 +4,31 @@ import { supabase } from "@/lib/supabase";
 import { getDropItem } from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
-  const sessionId = request.nextUrl.searchParams.get("session_id");
+  const sessionId = request.nextUrl.searchParams.get("session_id")?.trim();
   if (!sessionId) {
+    console.log("[poll] No session_id provided");
     return NextResponse.json({ order: null });
   }
 
-  const { data: order } = await supabase
+  console.log("[poll] Querying orders with stripe_session_id:", sessionId);
+
+  const { data: order, error } = await supabase
     .from("orders")
-    .select("drop_item_id, drop_title, restaurant_name, price_paid, qr_token, status, redemption_status")
+    .select("drop_item_id, drop_title, restaurant_name, price_paid, qr_token, status, redemption_status, quantity")
     .eq("stripe_session_id", sessionId)
-    .single();
+    .maybeSingle();
+
+  if (error) {
+    console.log("[poll] Supabase error:", error.message);
+    return NextResponse.json({ order: null });
+  }
 
   if (!order?.qr_token) {
+    console.log("[poll] No order found yet for session:", sessionId);
     return NextResponse.json({ order: null });
   }
+
+  console.log("[poll] Order found:", { qr_token: order.qr_token, status: order.status });
 
   const dropItem = order.drop_item_id ? getDropItem(order.drop_item_id) : null;
 
