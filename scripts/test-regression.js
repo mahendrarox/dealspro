@@ -920,6 +920,130 @@ async function testQuantity() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// TEST 14: CANARY FLOW WITH QUANTITY = 2
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testCanaryQty2() {
+  console.log("\n── Test 14: Canary Flow (qty=2) ──");
+  const supabase = getSupabase();
+  const dropId = "test-canary-qty2-" + Date.now();
+  const totalSpots = 5;
+  const phone = "+10000000004";
+  let step = 0;
+  let canarySid = "";
+  let canaryQr = "";
+
+  try {
+    // Step 1: Seed initial inventory (create 1 existing order so spots = 4 remaining)
+    step = 1;
+    const seedSid = testId();
+    await supabase.rpc("create_order_atomic", {
+      p_stripe_session_id: seedSid,
+      p_phone: "+10000000005",
+      p_drop_item_id: dropId,
+      p_drop_title: "Canary Qty2 Test",
+      p_restaurant_name: "Test Restaurant",
+      p_price_paid: 9.99,
+      p_quantity: 1,
+      p_qr_token: testId(),
+      p_total_spots: totalSpots,
+    });
+
+    // Compute initial spots
+    const { data: initOrders } = await supabase
+      .from("orders")
+      .select("quantity")
+      .eq("drop_item_id", dropId)
+      .eq("status", "paid");
+    const initialClaimed = (initOrders || []).reduce((s, r) => s + (r.quantity ?? 1), 0);
+    const initialRemaining = totalSpots - initialClaimed;
+    console.log(`  [INFO] Initial: claimed=${initialClaimed}, remaining=${initialRemaining}`);
+
+    if (initialRemaining < 2) {
+      fail("Canary qty=2 Step 1", `Not enough spots: remaining=${initialRemaining}`);
+      return;
+    }
+    pass("Canary qty=2 Step 1: initial spots verified (remaining=" + initialRemaining + ")");
+
+    // Step 2: Simulate webhook — create order with qty=2 via RPC
+    step = 2;
+    canarySid = testId();
+    canaryQr = testId();
+    const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_order_atomic", {
+      p_stripe_session_id: canarySid,
+      p_phone: phone,
+      p_drop_item_id: dropId,
+      p_drop_title: "Canary Qty2 Test",
+      p_restaurant_name: "Test Restaurant",
+      p_price_paid: 19.98,
+      p_quantity: 2,
+      p_qr_token: canaryQr,
+      p_total_spots: totalSpots,
+    });
+    if (rpcErr) { fail("Canary qty=2 Step 2: RPC create", rpcErr.message); return; }
+    if (rpcResult?.status !== "created") { fail("Canary qty=2 Step 2", `Expected 'created', got '${rpcResult?.status}'`); return; }
+    pass("Canary qty=2 Step 2: order created with qty=2");
+
+    // Step 3: Verify order in DB
+    step = 3;
+    const { data: dbOrder, error: dbErr } = await supabase
+      .from("orders")
+      .select("quantity, status, drop_item_id, price_paid")
+      .eq("stripe_session_id", canarySid)
+      .maybeSingle();
+    if (dbErr || !dbOrder) { fail("Canary qty=2 Step 3: DB verify", dbErr?.message || "Order not found"); return; }
+    if (dbOrder.quantity !== 2) { fail("Canary qty=2 Step 3", `DB quantity=${dbOrder.quantity}, expected 2`); return; }
+    if (dbOrder.status !== "paid") { fail("Canary qty=2 Step 3", `DB status='${dbOrder.status}', expected 'paid'`); return; }
+    pass("Canary qty=2 Step 3: DB order verified (qty=2, status=paid)");
+
+    // Step 4: Poll API returns order with qty=2
+    step = 4;
+    const pollRes = await fetchWithRetry(`${BASE_URL}/api/order/poll?session_id=${encodeURIComponent(canarySid)}`);
+    const pollData = await pollRes.json();
+    if (!pollData.order) { fail("Canary qty=2 Step 4: poll", "Order not found in poll"); return; }
+    if ((pollData.order.quantity ?? 1) !== 2) { fail("Canary qty=2 Step 4", `Poll quantity=${pollData.order.quantity}, expected 2`); return; }
+    pass("Canary qty=2 Step 4: poll returns order with qty=2");
+
+    // Step 5: Redeem — first call succeeds
+    step = 5;
+    const { data: r1, error: re1 } = await supabase.rpc("redeem_order_atomic", { p_qr_token: canaryQr });
+    if (re1) { fail("Canary qty=2 Step 5a: redeem", re1.message); return; }
+    if (r1?.status !== "redeemed") { fail("Canary qty=2 Step 5a", `Expected 'redeemed', got '${r1?.status}'`); return; }
+    pass("Canary qty=2 Step 5a: redeem → redeemed");
+
+    // Step 5b: Second redeem → already_redeemed
+    const { data: r2, error: re2 } = await supabase.rpc("redeem_order_atomic", { p_qr_token: canaryQr });
+    if (re2) { fail("Canary qty=2 Step 5b: re-redeem", re2.message); return; }
+    if (r2?.status !== "already_redeemed") { fail("Canary qty=2 Step 5b", `Expected 'already_redeemed', got '${r2?.status}'`); return; }
+    pass("Canary qty=2 Step 5b: re-redeem → already_redeemed");
+
+    // Step 6: Inventory validation — spots should have decreased by exactly 2
+    step = 6;
+    const { data: finalOrders } = await supabase
+      .from("orders")
+      .select("quantity")
+      .eq("drop_item_id", dropId)
+      .eq("status", "paid");
+    const finalClaimed = (finalOrders || []).reduce((s, r) => s + (r.quantity ?? 1), 0);
+    const finalRemaining = totalSpots - finalClaimed;
+    const delta = initialRemaining - finalRemaining;
+    console.log(`  [INFO] Final: claimed=${finalClaimed}, remaining=${finalRemaining}, delta=${delta}`);
+
+    if (delta !== 2) { fail("Canary qty=2 Step 6: inventory", `Spots decreased by ${delta}, expected 2`); return; }
+    pass("Canary qty=2 Step 6: inventory decreased by exactly 2");
+
+  } catch (err) {
+    fail(`Canary qty=2: failed at step ${step}`, err.message);
+  } finally {
+    // Cleanup test data for this canary
+    if (canarySid) await supabase.from("orders").delete().eq("stripe_session_id", canarySid);
+    await supabase.from("orders").delete().eq("phone", phone);
+    await supabase.from("orders").delete().eq("phone", "+10000000005");
+    await supabase.from("orders").delete().like("drop_item_id", "test-canary-qty2-%");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // CLEANUP + MAIN
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -987,6 +1111,7 @@ async function main() {
     await testCanaryFlow();
     await testDropConfig();
     await testQuantity();
+    await testCanaryQty2();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
