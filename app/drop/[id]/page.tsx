@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { DROP_ITEMS, type DropItem, getDropItem, canPurchase, isPickupInProgress, hasEnded, formatTimeWindow, formatDate, getDiscountPct, getSavings } from "@/lib/constants";
+import PhoneInput, { isPhoneValid, toE164 } from "@/components/PhoneInput";
 
 const T = {
   red: "#F93A25", red50: "rgba(249,58,37,0.08)", green: "#16A34A",
@@ -33,8 +34,8 @@ function DealPageInner() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   // Phone capture state
-  const [phone, setPhone] = useState<string | null>(null); // null = not yet checked
-  const [phoneInput, setPhoneInput] = useState("");
+  const [phone, setPhone] = useState<string | null>(null); // null = not yet checked, "" = no phone, "+1..." = has phone
+  const [phoneInputVal, setPhoneInputVal] = useState(""); // formatted display value
   const [phoneError, setPhoneError] = useState("");
   const [phoneSaving, setPhoneSaving] = useState(false);
 
@@ -97,21 +98,13 @@ function DealPageInner() {
   const maxQty = Math.min(4, spotsRemaining ?? 4);
   const total = (item.price * quantity).toFixed(2);
 
-  // Normalize US phone to E.164
-  const normalizePhone = (raw: string): string | null => {
-    const digits = raw.replace(/\D/g, "");
-    if (digits.length === 10) return `+1${digits}`;
-    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-    return null;
-  };
-
   const handlePhoneSubmit = async () => {
     setPhoneError("");
-    const normalized = normalizePhone(phoneInput);
-    if (!normalized) {
+    if (!isPhoneValid(phoneInputVal)) {
       setPhoneError("Enter a valid 10-digit US phone number");
       return;
     }
+    const normalized = toE164(phoneInputVal);
     setPhoneSaving(true);
     try {
       const res = await fetch("/api/lead", {
@@ -265,49 +258,17 @@ function DealPageInner() {
               marginBottom: "16px", padding: "20px", background: T.n50,
               borderRadius: "14px", border: `1px solid ${T.n200}`,
             }}>
-              <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: T.n900, marginBottom: "10px" }}>
-                Enter your phone to claim this deal
-              </label>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <div style={{
-                  display: "flex", alignItems: "center", flex: 1,
-                  background: T.n0, borderRadius: "10px", border: `1.5px solid ${phoneError ? T.red : T.n200}`,
-                  padding: "0 14px", transition: "border-color 150ms ease",
-                }}>
-                  <span style={{ fontSize: "14px", color: T.n400, fontWeight: 600, marginRight: "6px" }}>+1</span>
-                  <input
-                    type="tel"
-                    placeholder="(555) 123-4567"
-                    value={phoneInput}
-                    onChange={(e) => { setPhoneInput(e.target.value); setPhoneError(""); }}
-                    onKeyDown={(e) => { if (e.key === "Enter") handlePhoneSubmit(); }}
-                    style={{
-                      border: "none", outline: "none", background: "transparent",
-                      fontSize: "15px", fontFamily: T.display, color: T.n900,
-                      padding: "12px 0", width: "100%",
-                    }}
-                  />
-                </div>
-                <button
-                  onClick={handlePhoneSubmit}
-                  disabled={phoneSaving || !phoneInput.trim()}
-                  style={{
-                    padding: "12px 20px", borderRadius: "10px", border: "none",
-                    background: !phoneInput.trim() ? T.n200 : T.red,
-                    color: !phoneInput.trim() ? T.n400 : T.n0,
-                    fontFamily: T.display, fontWeight: 700, fontSize: "14px",
-                    cursor: !phoneInput.trim() || phoneSaving ? "default" : "pointer",
-                    transition: "all 150ms ease", whiteSpace: "nowrap",
-                  }}
-                >
-                  {phoneSaving ? "..." : "Continue"}
-                </button>
-              </div>
-              {phoneError && (
-                <div style={{ marginTop: "8px", fontSize: "12px", color: T.red }}>
-                  {phoneError}
-                </div>
-              )}
+              <PhoneInput
+                value={phoneInputVal}
+                onChange={(v) => { setPhoneInputVal(v); setPhoneError(""); }}
+                onSubmit={handlePhoneSubmit}
+                label="Enter your phone to claim this deal"
+                showButton
+                buttonText="Continue"
+                buttonLoading={phoneSaving}
+                error={phoneError}
+                inputBg={T.n0}
+              />
             </div>
           )}
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { DROP_ITEMS, type DropItem, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
 import type { SpotsInfo } from "@/lib/spots";
+import { formatPhone } from "@/components/PhoneInput";
 
 const T = {
   color: {
@@ -48,13 +49,7 @@ function useInView() {
   return [ref, v];
 }
 
-function formatPhone(val: string) {
-  const d = val.replace(/\D/g, "").slice(0, 10);
-  if (!d.length) return "";
-  if (d.length <= 3) return `(${d}`;
-  if (d.length <= 6) return `(${d.slice(0,3)}) ${d.slice(3)}`;
-  return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
-}
+// formatPhone imported from @/components/PhoneInput
 
 // ── LOGO: Uses actual brand logo from /public/logo.png ──
 function DPLogo({ size = 36, dark = false }) {
