@@ -6,10 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:regression": "node scripts/test-regression.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.2",
+    "dotenv": "^17.3.1",
     "next": "16.1.6",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
