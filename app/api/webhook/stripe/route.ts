@@ -4,7 +4,14 @@ import { supabase } from "@/lib/supabase";
 import { getDropItem, formatTimeWindow } from "@/lib/constants";
 import { randomUUID } from "crypto";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+// ── Lazy Stripe init — prevents crash if env var missing at module load ──
+function getStripe(): Stripe {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    throw new Error("STRIPE_SECRET_KEY is missing from environment variables");
+  }
+  return new Stripe(key);
+}
 
 // ── Structured logging ──────────────────────────────────────────────
 function log(event_type: string, data: Record<string, unknown>) {
@@ -12,20 +19,45 @@ function log(event_type: string, data: Record<string, unknown>) {
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    log("webhook_received", {});
+  console.log("🔥 WEBHOOK FUNCTION STARTED");
 
+  try {
+    log("webhook_received", { url: request.url });
+
+    // ── Init Stripe lazily ──
+    let stripe: Stripe;
+    try {
+      stripe = getStripe();
+      log("stripe_init", { success: true });
+    } catch (initErr) {
+      log("webhook_error", {
+        error: "Stripe init failed",
+        message: initErr instanceof Error ? initErr.message : String(initErr),
+      });
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── Read raw body and signature ──
     const rawBody = await request.text();
     const sig = request.headers.get("stripe-signature");
+
+    log("webhook_signature_check", {
+      has_signature: !!sig,
+      body_length: rawBody.length,
+      has_webhook_secret: !!process.env.STRIPE_WEBHOOK_SECRET,
+    });
 
     if (!sig) {
       log("webhook_error", { error: "Missing stripe-signature header" });
       return new Response("Missing signature", { status: 400 });
     }
 
+    // ── Construct event ──
     let event: Stripe.Event;
     try {
+      log("webhook_constructing_event", { sig_prefix: sig.substring(0, 20) + "..." });
       event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET!);
+      log("webhook_event_constructed", { type: event.type, id: event.id });
     } catch (err) {
       log("webhook_error", {
         error: "Signature verification failed",
@@ -34,23 +66,34 @@ export async function POST(request: NextRequest) {
       return new Response("Invalid signature", { status: 400 });
     }
 
-    log("webhook_event", { type: event.type });
+    log("webhook_event", { type: event.type, event_id: event.id });
 
     if (event.type !== "checkout.session.completed") {
+      log("webhook_skipped", { type: event.type, reason: "Not checkout.session.completed" });
       return new Response("ok", { status: 200 });
     }
 
     const session = event.data.object as Stripe.Checkout.Session;
     const stripeSessionId = session.id;
 
-    log("webhook_processing", { session_id: stripeSessionId });
+    log("webhook_processing", {
+      session_id: stripeSessionId,
+      payment_status: session.payment_status,
+      customer_email: session.customer_details?.email,
+    });
 
     // ── Extract metadata ──
     const phone = session.metadata?.phone;
     const dropItemId = session.metadata?.drop_item_id;
     const quantity = parseInt(session.metadata?.quantity || "1") || 1;
 
-    log("webhook_metadata", { phone, drop_item_id: dropItemId, quantity, session_id: stripeSessionId });
+    log("webhook_metadata", {
+      phone,
+      drop_item_id: dropItemId,
+      quantity,
+      session_id: stripeSessionId,
+      all_metadata: session.metadata,
+    });
 
     if (!phone || !dropItemId) {
       log("webhook_error", {
@@ -58,15 +101,22 @@ export async function POST(request: NextRequest) {
         stripe_session_id: stripeSessionId,
         metadata: session.metadata,
       });
-      // Return 200 — can't process, but don't make Stripe retry
       return new Response("ok", { status: 200 });
     }
 
     // ── Server-side price truth — look up canonical price from constants ──
     const item = getDropItem(dropItemId);
+    log("webhook_drop_lookup", {
+      drop_item_id: dropItemId,
+      found: !!item,
+      title: item?.title,
+      price: item?.price,
+      total_spots: item?.total_spots,
+    });
+
     if (!item) {
       log("webhook_error", {
-        error: "Unknown drop_item_id",
+        error: "Unknown drop_item_id — not found in constants",
         drop_item_id: dropItemId,
         stripe_session_id: stripeSessionId,
       });
@@ -84,6 +134,8 @@ export async function POST(request: NextRequest) {
       price_paid: pricePaid,
       qr_token: qrToken,
       total_spots: item.total_spots,
+      drop_title: item.title,
+      restaurant_name: item.restaurant_name,
     });
 
     // ── Call atomic RPC — handles idempotency, capacity check, and insert ──
@@ -99,24 +151,29 @@ export async function POST(request: NextRequest) {
       p_total_spots: item.total_spots,
     });
 
+    log("webhook_rpc_response", {
+      stripe_session_id: stripeSessionId,
+      rpc_error: rpcError ? { message: rpcError.message, code: rpcError.code, details: rpcError.details } : null,
+      rpc_result: rpcResult,
+    });
+
     if (rpcError) {
       log("webhook_error", {
         error: "RPC create_order_atomic failed",
         message: rpcError.message,
         code: rpcError.code,
         details: rpcError.details,
+        hint: rpcError.hint,
         drop_item_id: dropItemId,
         phone,
         quantity,
         stripe_session_id: stripeSessionId,
       });
-      // Return 200 to prevent Stripe from retrying endlessly on persistent errors
-      // The structured log above will alert us to investigate
       return new Response("ok", { status: 200 });
     }
 
     const rpcStatus = rpcResult?.status;
-    log("webhook_rpc_result", { status: rpcStatus, result: rpcResult, stripe_session_id: stripeSessionId });
+    log("webhook_rpc_status", { status: rpcStatus, stripe_session_id: stripeSessionId });
 
     // ── Branch on RPC result ──
     if (rpcStatus === "duplicate") {
@@ -146,6 +203,7 @@ export async function POST(request: NextRequest) {
             ? session.payment_intent
             : session.payment_intent?.id;
         if (paymentIntentId) {
+          log("refund_initiating", { payment_intent: paymentIntentId, stripe_session_id: stripeSessionId });
           await stripe.refunds.create({ payment_intent: paymentIntentId });
           log("refund_triggered", {
             drop_item_id: dropItemId,
@@ -184,6 +242,7 @@ export async function POST(request: NextRequest) {
       const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
 
       if (twilioSid && twilioToken && twilioPhone) {
+        log("sms_init", { phone });
         const twilio = (await import("twilio")).default;
         const twilioClient = twilio(twilioSid, twilioToken);
 
@@ -211,6 +270,8 @@ export async function POST(request: NextRequest) {
             to: phone,
           });
           log("sms_sent", { drop_item_id: dropItemId, phone, sid: msg.sid });
+        } else {
+          log("sms_skipped", { reason: "User not found in users table", phone });
         }
       } else {
         log("sms_skipped", { reason: "Twilio env vars not configured" });
@@ -223,12 +284,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    log("webhook_complete", { stripe_session_id: stripeSessionId, status: "success" });
     return new Response("ok", { status: 200 });
   } catch (outerErr) {
-    // Catch-all: log the error but ALWAYS return 200 to prevent Stripe retries
-    console.error("Webhook unhandled error:", outerErr);
+    console.error("🚨 WEBHOOK UNHANDLED ERROR:", outerErr);
     log("webhook_error", {
-      error: "Unhandled exception in webhook",
+      error: "Unhandled exception in webhook handler",
       message: outerErr instanceof Error ? outerErr.message : String(outerErr),
       stack: outerErr instanceof Error ? outerErr.stack : undefined,
     });
