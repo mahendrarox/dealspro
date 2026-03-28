@@ -12,7 +12,7 @@ export interface DropItem {
   original_price: number; // e.g. 19.99
   total_spots: number;
   image_url: string;
-  status: "live" | "sold_out" | "expired";
+  status: "live" | "sold_out" | "expired" | "cancelled";
   stripe_price_id: string; // empty for now — using price_data
   redemption_valid_until: string; // ISO datetime "YYYY-MM-DDTHH:MM:SS"
 }
@@ -22,10 +22,10 @@ export interface DropItem {
 export const DROP_ITEMS: DropItem[] = [
   {
     id: "drop-biryani-mar28",
-    drop_id: "week_mar_28",
+    drop_id: "week_apr_02",
     restaurant_name: "Tikka Grill",
     title: "Biryani Night",
-    date: "2026-03-28",
+    date: "2026-04-02",
     start_time: "17:00",
     end_time: "19:00",
     price: 9.99,
@@ -34,14 +34,14 @@ export const DROP_ITEMS: DropItem[] = [
     image_url: "",
     status: "live",
     stripe_price_id: "",
-    redemption_valid_until: "2026-03-29T23:59:00",
+    redemption_valid_until: "2026-04-03T23:59:00",
   },
   {
     id: "drop-butterchicken-mar29",
-    drop_id: "week_mar_28",
+    drop_id: "week_apr_02",
     restaurant_name: "Tikka Grill",
     title: "Butter Chicken Night",
-    date: "2026-03-29",
+    date: "2026-04-03",
     start_time: "18:00",
     end_time: "20:00",
     price: 9.99,
@@ -50,14 +50,14 @@ export const DROP_ITEMS: DropItem[] = [
     image_url: "",
     status: "live",
     stripe_price_id: "",
-    redemption_valid_until: "2026-03-30T23:59:00",
+    redemption_valid_until: "2026-04-04T23:59:00",
   },
   {
     id: "drop-tandoori-mar30",
-    drop_id: "week_mar_28",
+    drop_id: "week_apr_02",
     restaurant_name: "Tikka Grill",
     title: "Tandoori Special",
-    date: "2026-03-30",
+    date: "2026-04-04",
     start_time: "17:00",
     end_time: "19:00",
     price: 12.99,
@@ -66,7 +66,7 @@ export const DROP_ITEMS: DropItem[] = [
     image_url: "",
     status: "live",
     stripe_price_id: "",
-    redemption_valid_until: "2026-03-31T23:59:00",
+    redemption_valid_until: "2026-04-05T23:59:00",
   },
 ];
 
@@ -87,8 +87,9 @@ function toDate(dateStr: string, timeStr: string): Date {
   return new Date(`${dateStr}T${timeStr}:00`);
 }
 
-/** True if current time is before the item's start_time on its date */
+/** True if current time is before the item's start_time on its date and item is not cancelled */
 export function canPurchase(item: DropItem): boolean {
+  if (item.status === "cancelled") return false;
   return new Date() < toDate(item.date, item.start_time);
 }
 
