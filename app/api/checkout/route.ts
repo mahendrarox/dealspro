@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       restaurant_name: item.restaurant_name,
     },
     success_url: `${appUrl}/ticket/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${appUrl}/deal/${item.id}`,
+    cancel_url: `${appUrl}/drop/${item.id}`,
   });
 
   console.log("[Checkout] Session created:", session.id);

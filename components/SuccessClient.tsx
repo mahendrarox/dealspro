@@ -1,38 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 
-const T = {
-  color: {
-    red500: "#F93A25", red600: "#E0311F",
-    green500: "#16A34A", green50: "#DCFCE7",
-    n0: "#FFFFFF", n50: "#F7F7F8", n200: "#E4E4E7",
-    n400: "#A1A1AA", n500: "#52525B", n800: "#1C1C21",
-    n900: "#18181B", n950: "#111114",
-  },
-  font: { display: "'DM Sans', sans-serif", mono: "'JetBrains Mono', monospace" },
-};
-
-const CONFETTI_COLORS = ["#F93A25", "#FF6B4A", "#FFD700", "#16A34A", "#3B82F6", "#F472B6", "#FFFFFF"];
-
-interface ConfettiData {
-  color: string; left: number; delay: number; duration: number;
-  endX: number; endY: number; rotation: number; size: number; isCircle: boolean;
-}
-
-function generateConfetti(): ConfettiData[] {
-  return Array.from({ length: 45 }, (_, i) => ({
-    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-    left: 10 + Math.random() * 80,
-    delay: Math.random() * 0.6,
-    duration: 1.8 + Math.random() * 1.2,
-    endX: (Math.random() - 0.5) * 300,
-    endY: -(200 + Math.random() * 400),
-    rotation: Math.random() * 720 - 360,
-    size: 6 + Math.random() * 6,
-    isCircle: i % 3 === 0,
-  }));
-}
+const F = { display: "'DM Sans', sans-serif", mono: "'JetBrains Mono', monospace" };
 
 interface SuccessClientProps {
   order: {
@@ -50,29 +20,23 @@ interface SuccessClientProps {
 }
 
 export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow, dealCardUrl, date, redemptionValidUntil }: SuccessClientProps) {
-  const [mounted, setMounted] = useState(false);
   const [showContent, setShowContent] = useState(false);
   const [polling, setPolling] = useState(!order);
-  const confetti = useMemo(() => mounted ? generateConfetti() : [], [mounted]);
   const [currentOrder, setCurrentOrder] = useState(order);
   const [currentQr, setCurrentQr] = useState(qrDataUrl);
   const [currentUrl, setCurrentUrl] = useState(dealCardUrl);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    setMounted(true);
-    const t = setTimeout(() => setShowContent(true), 200);
+    const t = setTimeout(() => setShowContent(true), 100);
     return () => clearTimeout(t);
   }, []);
 
-  // Poll for order if webhook hasn't fired yet
   useEffect(() => {
     if (currentOrder || !polling) return;
-
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("session_id");
     if (!sessionId) { setPolling(false); return; }
-
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/order/poll?session_id=${sessionId}`);
@@ -87,7 +51,6 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
         }
       } catch { /* keep polling */ }
     }, 2000);
-
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [currentOrder, polling]);
 
@@ -95,7 +58,7 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
     if (!currentQr) return;
     const link = document.createElement("a");
     link.href = currentQr;
-    link.download = `dealspro-deal-card.png`;
+    link.download = "dealspro-deal-card.png";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -117,341 +80,168 @@ export default function SuccessClient({ order, qrDataUrl, savings, pickupWindow,
     }
   };
 
+  const validDate = redemptionValidUntil
+    ? new Date(redemptionValidUntil).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    : null;
+
   return (
     <div style={{
       minHeight: "100vh",
       background: "#0F0F0F",
-      fontFamily: T.font.display,
+      fontFamily: F.display,
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
       padding: "24px 16px",
-      textAlign: "center",
-      position: "relative",
-      overflow: "hidden",
     }}>
       <style>{`
-        @keyframes confetti-burst {
-          0% { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(0); }
-          10% { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(1.2); }
-          100% { opacity: 0; transform: translate(var(--end-x), var(--end-y)) rotate(var(--rotation)) scale(0.5); }
-        }
-        @keyframes fade-up {
-          from { opacity: 0; transform: translateY(30px) scale(0.95); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes pulse-glow {
-          0%, 100% { box-shadow: 0 0 20px rgba(249,58,37,0.2); }
-          50% { box-shadow: 0 0 40px rgba(249,58,37,0.4); }
-        }
-        @keyframes shimmer {
-          0% { background-position: -200% center; }
-          100% { background-position: 200% center; }
-        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
       `}</style>
 
-      {/* Confetti — client-only to avoid hydration mismatch */}
-      {mounted && (
-        <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 10 }}>
-          {confetti.map((c, i) => (
-            <div
-              key={i}
-              style={{
-                position: "absolute",
-                left: `${c.left}%`,
-                bottom: "40%",
-                width: `${c.size}px`,
-                height: `${c.size}px`,
-                background: c.color,
-                borderRadius: c.isCircle ? "50%" : "2px",
-                opacity: 0,
-                animation: `confetti-burst ${c.duration}s ${c.delay}s ease-out forwards`,
-                ["--end-x" as string]: `${c.endX}px`,
-                ["--end-y" as string]: `${c.endY}px`,
-                ["--rotation" as string]: `${c.rotation}deg`,
-              }}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Main content */}
       <div style={{
-        position: "relative",
-        zIndex: 5,
-        maxWidth: "420px",
+        maxWidth: "400px",
         width: "100%",
         opacity: showContent ? 1 : 0,
-        transform: showContent ? "translateY(0) scale(1)" : "translateY(30px) scale(0.95)",
-        transition: "all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)",
+        transform: showContent ? "translateY(0)" : "translateY(16px)",
+        transition: "all 0.5s ease",
       }}>
-        {/* Top label */}
+        {/* White card */}
         <div style={{
-          fontFamily: T.font.mono,
-          fontSize: "11px",
-          fontWeight: 800,
-          letterSpacing: "0.15em",
-          color: T.color.red500,
-          textTransform: "uppercase",
-          marginBottom: "12px",
-        }}>
-          DealsPro
-        </div>
-
-        {/* Main heading */}
-        <h1 style={{
-          fontSize: "36px",
-          fontWeight: 800,
-          color: T.color.n0,
-          letterSpacing: "-0.03em",
-          lineHeight: 1.1,
-          marginBottom: "16px",
-        }}>
-          Deal Card<br />
-          <span style={{ color: T.color.red500 }}>Secured!</span>
-        </h1>
-
-        {/* Savings badge */}
-        <div style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "6px",
-          background: "rgba(22, 163, 74, 0.15)",
-          border: "1px solid rgba(22, 163, 74, 0.3)",
-          borderRadius: "9999px",
-          padding: "8px 20px",
-          marginBottom: "32px",
-        }}>
-          <span style={{ fontSize: "18px" }}>🎉</span>
-          <span style={{
-            fontFamily: T.font.mono,
-            fontSize: "14px",
-            fontWeight: 700,
-            color: T.color.green500,
-            letterSpacing: "0.02em",
-          }}>
-            You saved {savings}!
-          </span>
-        </div>
-
-        {/* Deal card */}
-        <div style={{
-          background: "linear-gradient(145deg, #1A1A1F, #141417)",
+          background: "#FFFFFF",
           borderRadius: "20px",
           overflow: "hidden",
-          border: "1px solid rgba(255,255,255,0.08)",
-          animation: showContent ? "pulse-glow 3s ease-in-out infinite 1s" : "none",
+          boxShadow: "0 8px 40px rgba(0,0,0,0.25)",
         }}>
-          {/* Card header */}
-          <div style={{
-            padding: "24px 24px 16px",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-          }}>
+          {/* Header */}
+          <div style={{ padding: "32px 28px 24px", textAlign: "center" }}>
             <div style={{
-              fontFamily: T.font.mono,
+              fontFamily: F.mono,
               fontSize: "10px",
               fontWeight: 800,
               letterSpacing: "0.12em",
-              color: T.color.red500,
+              color: "#F93A25",
               textTransform: "uppercase",
-              marginBottom: "8px",
+              marginBottom: "16px",
             }}>
-              Your Deal Card
+              DealsPro
             </div>
-            <div style={{
-              fontSize: "20px",
-              fontWeight: 700,
-              color: T.color.n0,
+            <h1 style={{
+              fontSize: "28px",
+              fontWeight: 800,
+              color: "#18181B",
               letterSpacing: "-0.02em",
+              lineHeight: 1.2,
+              marginBottom: "6px",
             }}>
-              {currentOrder?.drop_title ?? "Loading..."}
-            </div>
-            <div style={{ fontSize: "14px", color: T.color.n400, marginTop: "4px" }}>
-              {currentOrder?.restaurant_name ?? ""}
+              Deal Card Secured!
+            </h1>
+            <div style={{ fontSize: "14px", color: "#16A34A", fontWeight: 500, marginTop: "8px" }}>
+              You saved {savings}
             </div>
           </div>
 
-          {/* QR Code section */}
-          <div style={{
-            padding: "24px",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-          }}>
+          {/* Deal info */}
+          <div style={{ padding: "0 28px 20px" }}>
+            <div style={{
+              background: "#F7F7F8",
+              borderRadius: "12px",
+              padding: "16px 20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+            }}>
+              <div style={{ fontSize: "18px", fontWeight: 700, color: "#18181B" }}>
+                {currentOrder?.drop_title ?? "Loading..."}
+              </div>
+              <div style={{ fontSize: "14px", color: "#52525B" }}>
+                {currentOrder?.restaurant_name ?? ""}
+              </div>
+              {date && (
+                <div style={{ fontSize: "13px", color: "#52525B" }}>
+                  {date} · {pickupWindow}
+                </div>
+              )}
+              <div style={{ fontSize: "14px", fontWeight: 600, color: "#18181B", fontFamily: F.mono }}>
+                ${currentOrder ? Number(currentOrder.price_paid).toFixed(2) : "—"} paid
+              </div>
+            </div>
+          </div>
+
+          {/* QR Code */}
+          <div style={{ padding: "0 28px 24px", display: "flex", flexDirection: "column", alignItems: "center" }}>
             {currentQr ? (
               <div style={{
-                padding: "14px",
-                background: T.color.n0,
-                borderRadius: "14px",
+                padding: "16px",
+                background: "#FFFFFF",
+                borderRadius: "12px",
+                border: "1px solid #E4E4E7",
               }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={currentQr}
-                  alt="Deal Card QR Code"
-                  width={200}
-                  height={200}
-                  style={{ display: "block" }}
-                />
+                <img src={currentQr} alt="Deal Card QR Code" width={200} height={200} style={{ display: "block" }} />
               </div>
             ) : (
               <div style={{
-                width: "228px",
-                height: "228px",
-                borderRadius: "14px",
-                background: "linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%)",
-                backgroundSize: "200% 100%",
-                animation: "shimmer 1.5s infinite",
+                width: "232px", height: "232px", borderRadius: "12px",
+                background: "linear-gradient(90deg, #F7F7F8 25%, #E4E4E7 50%, #F7F7F8 75%)",
+                backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite",
               }} />
             )}
-          </div>
-
-          {/* Details */}
-          <div style={{
-            padding: "0 24px 20px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "13px", color: T.color.n400 }}>Restaurant</span>
-              <span style={{ fontSize: "14px", fontWeight: 600, color: T.color.n0 }}>
-                {currentOrder?.restaurant_name ?? "—"}
-              </span>
+            <div style={{ marginTop: "12px", fontSize: "13px", color: "#52525B", textAlign: "center" }}>
+              Show this to staff at {currentOrder?.restaurant_name ?? "the restaurant"}
             </div>
-            {date && (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "13px", color: T.color.n400 }}>Date</span>
-                <span style={{ fontSize: "14px", fontWeight: 600, color: T.color.n0 }}>{date}</span>
+            {validDate && (
+              <div style={{ marginTop: "4px", fontSize: "12px", color: "#A1A1AA", textAlign: "center" }}>
+                Valid until {validDate} at 11:59 PM
               </div>
             )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "13px", color: T.color.n400 }}>Pickup</span>
-              <span style={{ fontSize: "14px", fontWeight: 600, color: T.color.n0 }}>
-                {pickupWindow}
-              </span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "13px", color: T.color.n400 }}>You Paid</span>
-              <span style={{
-                fontSize: "14px",
-                fontWeight: 700,
-                fontFamily: T.font.mono,
-                color: T.color.red500,
-              }}>
-                ${currentOrder ? Number(currentOrder.price_paid).toFixed(2) : "—"}
-              </span>
-            </div>
           </div>
 
-          {/* Validity */}
-          {redemptionValidUntil && (
-            <div style={{
-              padding: "12px 24px 16px",
-              textAlign: "center",
-              fontSize: "12px",
-              color: T.color.n400,
-              fontFamily: T.font.mono,
-              letterSpacing: "0.03em",
+          {/* Action buttons */}
+          <div style={{ padding: "0 28px 28px", display: "flex", gap: "10px" }}>
+            <button onClick={handleSave} disabled={!currentQr} style={{
+              flex: 1, padding: "12px 16px", borderRadius: "10px",
+              border: "1px solid #E4E4E7", background: "#FFFFFF",
+              color: "#18181B", fontSize: "14px", fontWeight: 600,
+              fontFamily: F.display, cursor: currentQr ? "pointer" : "default",
+              opacity: currentQr ? 1 : 0.4, display: "flex",
+              alignItems: "center", justifyContent: "center", gap: "6px",
             }}>
-              Valid until {new Date(redemptionValidUntil).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} at 11:59 PM
-            </div>
-          )}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Save
+            </button>
+            <button onClick={handleShare} disabled={!currentUrl} style={{
+              flex: 1, padding: "12px 16px", borderRadius: "10px",
+              border: "1px solid #E4E4E7", background: "#FFFFFF",
+              color: "#18181B", fontSize: "14px", fontWeight: 600,
+              fontFamily: F.display, cursor: currentUrl ? "pointer" : "default",
+              opacity: currentUrl ? 1 : 0.4, display: "flex",
+              alignItems: "center", justifyContent: "center", gap: "6px",
+            }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+              Share
+            </button>
+          </div>
         </div>
 
-        {/* Action buttons */}
-        <div style={{
-          display: "flex",
-          gap: "12px",
-          marginTop: "24px",
-        }}>
-          <button
-            onClick={handleSave}
-            disabled={!currentQr}
-            style={{
-              flex: 1,
-              padding: "14px 20px",
-              borderRadius: "14px",
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.06)",
-              color: T.color.n0,
-              fontSize: "14px",
-              fontWeight: 600,
-              fontFamily: T.font.display,
-              cursor: currentQr ? "pointer" : "default",
-              opacity: currentQr ? 1 : 0.4,
-              transition: "all 0.2s ease",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            Save QR
-          </button>
-          <button
-            onClick={handleShare}
-            disabled={!currentUrl}
-            style={{
-              flex: 1,
-              padding: "14px 20px",
-              borderRadius: "14px",
-              border: "none",
-              background: T.color.red500,
-              color: T.color.n0,
-              fontSize: "14px",
-              fontWeight: 600,
-              fontFamily: T.font.display,
-              cursor: currentUrl ? "pointer" : "default",
-              opacity: currentUrl ? 1 : 0.4,
-              transition: "all 0.2s ease",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-            </svg>
-            Share
-          </button>
+        {/* Back link */}
+        <div style={{ textAlign: "center", marginTop: "20px" }}>
+          <a href="/" style={{ fontSize: "14px", color: "#A1A1AA", textDecoration: "none", fontWeight: 500 }}>
+            ← Browse More Deals
+          </a>
         </div>
 
-        {/* Footer link */}
-        <a
-          href="/"
-          style={{
-            display: "inline-block",
-            marginTop: "24px",
-            fontSize: "14px",
-            color: T.color.n400,
-            textDecoration: "none",
-            fontWeight: 500,
-            transition: "color 0.2s ease",
-          }}
-        >
-          ← Browse More Deals
-        </a>
-
-        {/* Loading state overlay text */}
         {polling && (
-          <div style={{
-            marginTop: "16px",
-            fontFamily: T.font.mono,
-            fontSize: "12px",
-            color: T.color.n400,
-            letterSpacing: "0.05em",
-          }}>
+          <div style={{ textAlign: "center", marginTop: "16px", fontFamily: F.mono, fontSize: "12px", color: "#A1A1AA", letterSpacing: "0.05em" }}>
             Confirming your deal card...
           </div>
         )}
