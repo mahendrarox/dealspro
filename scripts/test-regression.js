@@ -1112,6 +1112,7 @@ async function main() {
     await testDropConfig();
     await testQuantity();
     await testCanaryQty2();
+    await testPhoneCapture();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -1134,6 +1135,97 @@ async function main() {
     console.log("All tests passed! ✓");
     process.exit(0);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 15: Phone Capture on Drop Page
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testPhoneCapture() {
+  console.log("\n── Test 15: Phone Capture Flow ──");
+
+  // A. Lead API with phone only (drop page quick capture)
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "+10000000099" }),
+    });
+    if (res.status === 200) {
+      pass("Phone capture: phone-only lead → 200 OK");
+    } else {
+      const data = await res.json().catch(() => ({}));
+      fail("Phone capture: phone-only lead", `Status ${res.status}: ${data.error || "unknown"}`);
+    }
+  } catch (err) {
+    fail("Phone capture: phone-only lead", err.message);
+  }
+
+  // B. Lead API with full form (homepage flow still works)
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Test User", phone: "+10000000098", optIn: true }),
+    });
+    if (res.status === 200) {
+      pass("Phone capture: full form lead → 200 OK");
+    } else {
+      const data = await res.json().catch(() => ({}));
+      fail("Phone capture: full form lead", `Status ${res.status}: ${data.error || "unknown"}`);
+    }
+  } catch (err) {
+    fail("Phone capture: full form lead", err.message);
+  }
+
+  // C. Lead API with no phone → rejected
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "No Phone" }),
+    });
+    if (res.status === 400) {
+      pass("Phone capture: missing phone → 400 rejected");
+    } else {
+      fail("Phone capture: missing phone", `Expected 400, got ${res.status}`);
+    }
+  } catch (err) {
+    fail("Phone capture: missing phone", err.message);
+  }
+
+  // D. Drop page renders without phone (should show phone input area in HTML)
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/drop/drop-biryani-mar28`);
+    const html = await res.text();
+    if (res.status === 200 && html.includes("Biryani Night")) {
+      pass("Phone capture: drop page renders for direct-landing user");
+    } else {
+      fail("Phone capture: drop page renders", `Status ${res.status}`);
+    }
+  } catch (err) {
+    fail("Phone capture: drop page renders", err.message);
+  }
+
+  // E. Checkout without phone → rejected
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drop_item_id: "drop-biryani-mar28", quantity: 1 }),
+    });
+    if (res.status === 400) {
+      pass("Phone capture: checkout without phone → 400 rejected");
+    } else {
+      fail("Phone capture: checkout without phone", `Expected 400, got ${res.status}`);
+    }
+  } catch (err) {
+    fail("Phone capture: checkout without phone", err.message);
+  }
+
+  // Cleanup test users
+  const supabase = getSupabase();
+  await supabase.from("users").delete().in("phone", ["+10000000099", "+10000000098"]);
 }
 
 main();

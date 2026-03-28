@@ -32,6 +32,22 @@ function DealPageInner() {
   const [quantity, setQuantity] = useState(initialQty);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Phone capture state
+  const [phone, setPhone] = useState<string | null>(null); // null = not yet checked
+  const [phoneInput, setPhoneInput] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+  const [phoneSaving, setPhoneSaving] = useState(false);
+
+  // Check localStorage for existing phone on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("dp_phone");
+      setPhone(stored || "");
+    } catch {
+      setPhone("");
+    }
+  }, []);
+
   const item = getDropItem(id);
 
   // Fetch spots
@@ -81,14 +97,49 @@ function DealPageInner() {
   const maxQty = Math.min(4, spotsRemaining ?? 4);
   const total = (item.price * quantity).toFixed(2);
 
+  // Normalize US phone to E.164
+  const normalizePhone = (raw: string): string | null => {
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    return null;
+  };
+
+  const handlePhoneSubmit = async () => {
+    setPhoneError("");
+    const normalized = normalizePhone(phoneInput);
+    if (!normalized) {
+      setPhoneError("Enter a valid 10-digit US phone number");
+      return;
+    }
+    setPhoneSaving(true);
+    try {
+      const res = await fetch("/api/lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: normalized }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setPhoneError(data.error || "Could not save phone. Try again.");
+        setPhoneSaving(false);
+        return;
+      }
+      try { localStorage.setItem("dp_phone", normalized); } catch {}
+      setPhone(normalized);
+    } catch {
+      setPhoneError("Network error. Try again.");
+    }
+    setPhoneSaving(false);
+  };
+
   const handleClaim = async () => {
     setLoading(true);
     setError("");
     setShowConfirm(false);
 
-    const phone = localStorage.getItem("dp_phone") || "";
     if (!phone) {
-      setError("Please sign up on the homepage first to get your phone number on file.");
+      setError("Enter your phone number above to claim this deal.");
       setLoading(false);
       return;
     }
@@ -208,6 +259,58 @@ function DealPageInner() {
             )}
           </div>
 
+          {/* Phone capture — show when no phone stored */}
+          {phone === "" && purchasable && !sold && !cancelled && (
+            <div style={{
+              marginBottom: "16px", padding: "20px", background: T.n50,
+              borderRadius: "14px", border: `1px solid ${T.n200}`,
+            }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: T.n900, marginBottom: "10px" }}>
+                Enter your phone to claim this deal
+              </label>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{
+                  display: "flex", alignItems: "center", flex: 1,
+                  background: T.n0, borderRadius: "10px", border: `1.5px solid ${phoneError ? T.red : T.n200}`,
+                  padding: "0 14px", transition: "border-color 150ms ease",
+                }}>
+                  <span style={{ fontSize: "14px", color: T.n400, fontWeight: 600, marginRight: "6px" }}>+1</span>
+                  <input
+                    type="tel"
+                    placeholder="(555) 123-4567"
+                    value={phoneInput}
+                    onChange={(e) => { setPhoneInput(e.target.value); setPhoneError(""); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") handlePhoneSubmit(); }}
+                    style={{
+                      border: "none", outline: "none", background: "transparent",
+                      fontSize: "15px", fontFamily: T.display, color: T.n900,
+                      padding: "12px 0", width: "100%",
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={handlePhoneSubmit}
+                  disabled={phoneSaving || !phoneInput.trim()}
+                  style={{
+                    padding: "12px 20px", borderRadius: "10px", border: "none",
+                    background: !phoneInput.trim() ? T.n200 : T.red,
+                    color: !phoneInput.trim() ? T.n400 : T.n0,
+                    fontFamily: T.display, fontWeight: 700, fontSize: "14px",
+                    cursor: !phoneInput.trim() || phoneSaving ? "default" : "pointer",
+                    transition: "all 150ms ease", whiteSpace: "nowrap",
+                  }}
+                >
+                  {phoneSaving ? "..." : "Continue"}
+                </button>
+              </div>
+              {phoneError && (
+                <div style={{ marginTop: "8px", fontSize: "12px", color: T.red }}>
+                  {phoneError}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Quantity Selector — show whenever spots available and purchasable */}
           {purchasable && !sold && !cancelled && (
             <div style={{
@@ -271,24 +374,32 @@ function DealPageInner() {
           )}
 
           {/* Claim Button */}
-          <button
-            onClick={!disabled && !loading ? handleClaim : undefined}
-            disabled={disabled || loading}
-            style={{
-              width: "100%", padding: "18px", border: "none", borderRadius: "14px",
-              background: disabled ? T.n200 : loading ? T.n200 : T.red,
-              color: disabled || loading ? T.n400 : T.n0,
-              fontFamily: T.display, fontWeight: 700, fontSize: "16px", letterSpacing: "0.01em",
-              cursor: disabled || loading ? "default" : "pointer", transition: "all 150ms ease",
-              boxShadow: disabled || loading ? "none" : "0 4px 16px rgba(249,58,37,0.35)",
-            }}
-          >
-            {loading
-              ? "Setting up checkout..."
-              : disabled
-                ? (cancelled ? "Cancelled" : sold ? "Sold Out" : ended ? "Drop Ended" : pickupActive ? "Ordering Closed" : alreadyClaimed ? "Already Claimed" : "Unavailable")
-                : `🔥 Claim ${quantity} Spot${quantity > 1 ? "s" : ""} for $${total}`}
-          </button>
+          {(() => {
+            const noPhone = phone === "";
+            const btnDisabled = disabled || loading || noPhone;
+            return (
+              <button
+                onClick={!btnDisabled ? handleClaim : undefined}
+                disabled={btnDisabled}
+                style={{
+                  width: "100%", padding: "18px", border: "none", borderRadius: "14px",
+                  background: btnDisabled ? T.n200 : T.red,
+                  color: btnDisabled ? T.n400 : T.n0,
+                  fontFamily: T.display, fontWeight: 700, fontSize: "16px", letterSpacing: "0.01em",
+                  cursor: btnDisabled ? "default" : "pointer", transition: "all 150ms ease",
+                  boxShadow: btnDisabled ? "none" : "0 4px 16px rgba(249,58,37,0.35)",
+                }}
+              >
+                {loading
+                  ? "Setting up checkout..."
+                  : disabled
+                    ? (cancelled ? "Cancelled" : sold ? "Sold Out" : ended ? "Drop Ended" : pickupActive ? "Ordering Closed" : alreadyClaimed ? "Already Claimed" : "Unavailable")
+                    : noPhone
+                      ? "Enter phone number above ↑"
+                      : `🔥 Claim ${quantity} Spot${quantity > 1 ? "s" : ""} for $${total}`}
+              </button>
+            );
+          })()}
 
           {error && !alreadyClaimed && (
             <div style={{
