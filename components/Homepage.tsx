@@ -268,15 +268,16 @@ function CaptureForm({ dark }) {
       <button onClick={allValid && !loading ? submit : undefined} style={{
         width: "100%", padding: "18px 28px",
         border: "none",
-        borderRadius: T.radius.lg, fontFamily: T.font.display, fontWeight: 700,
+        borderRadius: T.radius.lg, fontFamily: T.font.display,
+        fontWeight: allValid && !loading ? 700 : 500,
         fontSize: "16px", letterSpacing: "0.03em",
-        background: allValid && !loading ? "linear-gradient(135deg, #F93A25 0%, #E0311F 100%)" : T.color.n200,
-        color: allValid && !loading ? "#FFFFFF" : T.color.n400,
+        background: allValid && !loading ? "linear-gradient(135deg, #F93A25 0%, #E0311F 100%)" : "#E5E7EB",
+        color: allValid && !loading ? "#FFFFFF" : `rgb(${Math.max(75 - name.trim().length * 8, 24)}, ${Math.max(85 - name.trim().length * 8, 24)}, ${Math.max(99 - name.trim().length * 8, 36)})`,
+        opacity: allValid && !loading ? 1 : 0.9,
         cursor: allValid && !loading ? "pointer" : "default",
-        transition: "all 250ms ease",
+        transition: "all 0.2s ease",
         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
         boxShadow: allValid && !loading ? "0 4px 16px rgba(249,58,37,0.45), 0 1px 3px rgba(0,0,0,0.1)" : "none",
-        transform: allValid && !loading ? "none" : "none",
       }}>
         {loading ? "Setting up checkout..." : allValid ? "Get My Deals" : !nameValid ? "Enter your name to continue" : !phoneValid ? (digits.length === 0 ? "Enter your phone number" : `${digitsLeft} digit${digitsLeft !== 1 ? "s" : ""} remaining`) : "Check the opt-in box above"}
         {allValid && !loading && <span style={{ fontSize: "18px" }}>→</span>}
