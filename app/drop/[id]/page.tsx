@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { DROP_ITEMS, type DropItem, getDropItem, canPurchase, isPickupInProgress, hasEnded, formatTimeWindow, formatDate, getDiscountPct, getSavings } from "@/lib/constants";
+import { DROP_ITEMS, type DropItem, getDropItem, canPurchase, isPickupInProgress, hasEnded, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, getSavings } from "@/lib/constants";
 import PhoneInput, { isPhoneValid, toE164 } from "@/components/PhoneInput";
 
 const T = {
@@ -215,7 +215,7 @@ function DealPageInner() {
         {/* Header */}
         <div style={{ background: `linear-gradient(135deg, ${T.n950}, #1C1C21)`, padding: "32px 28px 24px" }}>
           <div style={{ fontFamily: T.mono, fontSize: "10px", fontWeight: 800, letterSpacing: "0.12em", color: T.red, textTransform: "uppercase", marginBottom: "10px" }}>
-            {cancelled ? "⚠️ Cancelled" : `🔥 Limited Drop · ${formatDate(item)}`}
+            {cancelled ? "⚠️ Cancelled" : `🔥 Limited Drop · ${getTimeContext(item)}`}
           </div>
           <div style={{ fontSize: "24px", fontWeight: 800, color: T.n0, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: "6px" }}>
             {item.title}
@@ -241,8 +241,7 @@ function DealPageInner() {
           {/* Info rows */}
           <div style={{ background: T.n50, borderRadius: "14px", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px", marginBottom: "24px" }}>
             <InfoRow icon="🏪" label="Restaurant" value={item.restaurant_name} />
-            <InfoRow icon="📅" label="Date" value={formatDate(item)} />
-            <InfoRow icon="⏰" label="Time" value={formatTimeWindow(item)} />
+            <InfoRow icon="📅" label="When" value={getTimeContext(item)} />
             <InfoRow icon="💰" label="You Save" value={`$${(savings * quantity).toFixed(2)}`} highlight />
             {spotsRemaining !== null && (
               <InfoRow icon="🎟️" label="Spots Left" value={`${spotsRemaining} of ${item.total_spots}`} highlight={spotsRemaining <= 3} />

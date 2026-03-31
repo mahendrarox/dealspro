@@ -135,33 +135,46 @@ export function formatDate(item: DropItem): string {
   });
 }
 
-/** Human-readable time context: "Tonight", "Tomorrow evening", "In 2 days", etc. */
+/** Get current date in US Central Time (DFW area) */
+function getCentralDate(d: Date): { year: number; month: number; day: number } {
+  const parts = d.toLocaleDateString("en-US", { timeZone: "America/Chicago", year: "numeric", month: "numeric", day: "numeric" }).split("/");
+  return { year: parseInt(parts[2]), month: parseInt(parts[0]), day: parseInt(parts[1]) };
+}
+
+/**
+ * Human-readable time context with time window.
+ * "Tonight · 5–7 PM" | "Tomorrow · 5–7 PM" | "Thu, Apr 2 · 5–7 PM"
+ * Uses US Central Time for today/tomorrow calculations (DFW area).
+ */
 export function getTimeContext(item: DropItem): string {
   const now = new Date();
   const eventDate = new Date(`${item.date}T${item.start_time}:00`);
   const diffMs = eventDate.getTime() - now.getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  const tw = formatTimeWindow(item);
 
   if (diffMs < 0) {
-    if (isPickupInProgress(item)) return "Pickup in progress";
+    if (isPickupInProgress(item)) return `Pickup in progress · ${tw}`;
     return "Ended";
   }
 
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate());
-  const dayDiff = Math.round((eventDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const todayCT = getCentralDate(now);
+  const [ey, em, ed] = item.date.split("-").map(Number);
+
+  const todayNum = todayCT.year * 10000 + todayCT.month * 100 + todayCT.day;
+  const eventNum = ey * 10000 + em * 100 + ed;
+  const dayDiff = eventNum - todayNum;
 
   if (dayDiff === 0) {
-    if (diffHours <= 3) return `Starts in ${Math.ceil(diffHours)}h`;
-    return "Tonight";
+    const diffHours = diffMs / (1000 * 60 * 60);
+    if (diffHours <= 3) return `Starts in ${Math.ceil(diffHours)}h · ${tw}`;
+    return `Tonight · ${tw}`;
   }
-  if (dayDiff === 1) {
-    const startHour = parseInt(item.start_time.split(":")[0]);
-    return startHour >= 17 ? "Tomorrow evening" : "Tomorrow";
-  }
-  if (dayDiff <= 6) return `In ${dayDiff} days`;
-  return formatDate(item);
+  if (dayDiff === 1) return `Tomorrow · ${tw}`;
+
+  // "Thu, Apr 2 · 5–7 PM"
+  const d = new Date(`${item.date}T12:00:00`);
+  const short = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return `${short} · ${tw}`;
 }
 
 /** Compute savings: original_price - price */
