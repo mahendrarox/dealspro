@@ -417,7 +417,7 @@ export default function App() {
         <div className="hg" style={{ maxWidth: "1120px", margin: "0 auto", position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "60px", alignItems: "center" }}>
           <div style={{ animation: "fadeUp 0.6s ease both" }}>
             <h1 style={{ fontFamily: T.font.display, fontSize: "clamp(28px, 5vw, 44px)", fontWeight: 800, lineHeight: 1.15, letterSpacing: "-0.03em", color: "#fff", marginBottom: "20px" }}>Exclusive Restaurant Deals. <span style={{ color: T.color.red500 }}>Limited Drops.</span> Sent to Your Phone.</h1>
-            <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Exclusive limited-time deals from top local restaurants — released weekly in small batches. Once they're claimed, they're gone. No app required.</p>
+            <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Restaurant deals you can't find anywhere else. Dropped weekly. Claim before they sell out.</p>
             <CaptureForm dark />
           </div>
           <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={DROP_ITEMS[0]} spots={spots[DROP_ITEMS[0].id]} /></div></div>
@@ -427,10 +427,10 @@ export default function App() {
       {/* FOOD HERO IMAGE */}
       <section style={{ position: "relative", width: "100%", maxHeight: "420px", overflow: "hidden" }}>
         <Image
-          src="https://images.unsplash.com/photo-1633945274405-b6c8069047b0?auto=format&fit=crop&w=1600&q=80"
-          alt="Authentic hyderabadi biryani with saffron rice, garnish, and spices"
-          width={1600}
-          height={900}
+          src="https://images.unsplash.com/photo-1585937421612-70a008356fbe?auto=format&fit=crop&w=2400&q=85"
+          alt="Overhead view of biryani with raita, garnish, and sides on a table"
+          width={2400}
+          height={1350}
           sizes="100vw"
           priority={false}
           style={{ width: "100%", height: "auto", display: "block", objectFit: "cover", maxHeight: "420px", borderRadius: "0 0 16px 16px" }}
