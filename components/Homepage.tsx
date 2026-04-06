@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { DROP_ITEMS, type DropItem, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
 import type { SpotsInfo } from "@/lib/spots";
 import { formatPhone } from "@/components/PhoneInput";
 import { useUserLocation } from "@/lib/hooks/useUserLocation";
+import { haversineDistance } from "@/lib/utils/distance";
 
 const T = {
   color: {
@@ -36,6 +37,8 @@ const css = `
   @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
   @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
   @keyframes checkPop { 0%{transform:scale(0);opacity:0} 60%{transform:scale(1.2);opacity:1} 100%{transform:scale(1);opacity:1} }
+  .carousel-scroll::-webkit-scrollbar { display: none; }
+  .carousel-scroll { scrollbar-width: none; }
 `;
 
 function useInView() {
@@ -377,6 +380,31 @@ export default function App() {
   const [spots, setSpots] = useState<Record<string, SpotsInfo>>({});
   const { coords, denied, loading: locLoading, requestLocation, getDistance } = useUserLocation();
 
+  // Featured drop selection: soonest expiring → lowest remaining → closest
+  const { featuredDrop, carouselDrops } = useMemo(() => {
+    const active = DROP_ITEMS.filter(item => !hasEnded(item));
+    if (active.length === 0) return { featuredDrop: DROP_ITEMS[0], carouselDrops: [] };
+
+    const sorted = [...active].sort((a, b) => {
+      const endA = new Date(`${a.date}T${a.end_time}:00`).getTime();
+      const endB = new Date(`${b.date}T${b.end_time}:00`).getTime();
+      if (endA !== endB) return endA - endB;
+
+      const remA = spots[a.id]?.remaining ?? a.total_spots;
+      const remB = spots[b.id]?.remaining ?? b.total_spots;
+      if (remA !== remB) return remA - remB;
+
+      if (coords) {
+        const dA = haversineDistance(coords.lat, coords.lng, a.lat, a.lng);
+        const dB = haversineDistance(coords.lat, coords.lng, b.lat, b.lng);
+        return dA - dB;
+      }
+      return 0;
+    });
+
+    return { featuredDrop: sorted[0], carouselDrops: sorted.slice(1) };
+  }, [spots, coords]);
+
   const fetchSpots = useCallback(async () => {
     try {
       const res = await fetch("/api/spots");
@@ -423,7 +451,7 @@ export default function App() {
             <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Restaurant deals you can't find anywhere else. Dropped weekly. Claim before they sell out.</p>
             <CaptureForm dark />
           </div>
-          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={DROP_ITEMS[0]} spots={spots[DROP_ITEMS[0].id]} distance={getDistance(DROP_ITEMS[0].lat, DROP_ITEMS[0].lng)} /></div></div>
+          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={featuredDrop} spots={spots[featuredDrop.id]} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} /></div></div>
         </div>
       </section>
 
@@ -441,7 +469,8 @@ export default function App() {
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "50%", background: "linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%)", borderRadius: "0 0 16px 16px", pointerEvents: "none" }} />
       </section>
 
-      {/* ACTIVE DROPS */}
+      {/* ACTIVE DROPS — Carousel (only if 2+ drops) */}
+      {carouselDrops.length > 0 && (
       <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="This Week's Drops" title="Active Drops Near You" />
         {!coords && !denied && (
           <div style={{ textAlign: "center", marginBottom: "24px" }}>
@@ -450,7 +479,8 @@ export default function App() {
             </button>
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px" }}>{DROP_ITEMS.map((item, i) => <DropCard key={item.id} item={item} spots={spots[item.id]} delay={i * 120} distance={getDistance(item.lat, item.lng)} />)}</div></div></section>
+        <div className="carousel-scroll" style={{ display: "flex", gap: "20px", overflowX: "auto", scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch", paddingBottom: "8px" }}>{carouselDrops.map((item, i) => <div key={item.id} style={{ flex: "0 0 320px", maxWidth: "85vw", scrollSnapAlign: "start" }}><DropCard item={item} spots={spots[item.id]} delay={i * 120} distance={getDistance(item.lat, item.lng)} /></div>)}</div></div></section>
+      )}
 
       {/* HOW IT WORKS */}
       <section id="how-it-works" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="How It Works" title="Three Steps to Exclusive Deals" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "24px" }}>{[{ icon: Icon.phone, t: "Enter Your Name & Phone", d: "Sign up in 10 seconds. No app to download, no account to create." },{ icon: Icon.msg, t: "Get Weekly Deals", d: "Exclusive limited-time deals from local restaurants, delivered via text every week." },{ icon: Icon.qr, t: "Pay & Redeem", d: "Prepay online at the deal price. Show your QR code at the restaurant." }].map((s, i) => { const [r, v] = useInView(); return (<div key={i} ref={r} style={{ textAlign: "center", padding: "32px 24px", borderRadius: T.radius.xl, border: `1px solid ${T.color.n200}`, opacity: v ? 1 : 0, animation: v ? `fadeUp 0.5s ease ${i * 120}ms both` : "none" }}><div style={{ width: "60px", height: "60px", borderRadius: T.radius.xl, background: T.color.red50, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>{s.icon}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.red500, letterSpacing: "0.1em", marginBottom: "8px" }}>STEP {i + 1}</div><h3 style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "8px" }}>{s.t}</h3><p style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.6, color: T.color.n500 }}>{s.d}</p></div>); })}</div></div></section>
