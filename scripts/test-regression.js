@@ -212,9 +212,9 @@ async function testSpots() {
     const spots = data.spots || data;
 
     const expectedIds = [
-      "drop-biryani-mar28",
-      "drop-butterchicken-mar29",
-      "drop-tandoori-mar30",
+      "drop-biryani-apr07",
+      "drop-butterchicken-apr08",
+      "drop-tandoori-apr09",
     ];
 
     for (const id of expectedIds) {
@@ -243,7 +243,7 @@ async function testWebhookIdempotency() {
   const { data: r1, error: e1 } = await supabase.rpc("create_order_atomic", {
     p_stripe_session_id: sid,
     p_phone: TEST_PHONE,
-    p_drop_item_id: "drop-biryani-mar28",
+    p_drop_item_id: "drop-biryani-apr07",
     p_drop_title: "Biryani Night",
     p_restaurant_name: "Tikka Grill",
     p_price_paid: 9.99,
@@ -266,7 +266,7 @@ async function testWebhookIdempotency() {
   const { data: r2, error: e2 } = await supabase.rpc("create_order_atomic", {
     p_stripe_session_id: sid,
     p_phone: TEST_PHONE,
-    p_drop_item_id: "drop-biryani-mar28",
+    p_drop_item_id: "drop-biryani-apr07",
     p_drop_title: "Biryani Night",
     p_restaurant_name: "Tikka Grill",
     p_price_paid: 9.99,
@@ -450,7 +450,7 @@ async function testCheckout() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         phone: "+12125550199",
-        drop_item_id: "drop-butterchicken-mar29",
+        drop_item_id: "drop-butterchicken-apr08",
         quantity: 1,
       }),
     });
@@ -476,7 +476,7 @@ async function testCheckout() {
   await supabase.rpc("create_order_atomic", {
     p_stripe_session_id: dupSid,
     p_phone: dupPhone,
-    p_drop_item_id: "drop-tandoori-mar30",
+    p_drop_item_id: "drop-tandoori-apr09",
     p_drop_title: "Tandoori Special",
     p_restaurant_name: "Tikka Grill",
     p_price_paid: 12.99,
@@ -491,7 +491,7 @@ async function testCheckout() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         phone: dupPhone,
-        drop_item_id: "drop-tandoori-mar30",
+        drop_item_id: "drop-tandoori-apr09",
         quantity: 1,
       }),
     });
@@ -515,29 +515,29 @@ async function testRouting() {
 
   // /drop/[id] → 200
   try {
-    const res = await fetchWithRetry(`${BASE_URL}/drop/drop-biryani-mar28`, { redirect: "manual" });
+    const res = await fetchWithRetry(`${BASE_URL}/drop/drop-biryani-apr07`, { redirect: "manual" });
     if (res.status === 200) {
-      pass("Route: /drop/drop-biryani-mar28 → 200");
+      pass("Route: /drop/drop-biryani-apr07 → 200");
     } else {
-      fail("Route: /drop/drop-biryani-mar28", `Status ${res.status}`);
+      fail("Route: /drop/drop-biryani-apr07", `Status ${res.status}`);
     }
   } catch (err) {
-    fail("Route: /drop/drop-biryani-mar28", err.message);
+    fail("Route: /drop/drop-biryani-apr07", err.message);
   }
 
   // /deal/[id] → redirect (301/307/308)
   try {
-    const res = await fetchWithRetry(`${BASE_URL}/deal/drop-biryani-mar28`, { redirect: "manual" });
+    const res = await fetchWithRetry(`${BASE_URL}/deal/drop-biryani-apr07`, { redirect: "manual" });
     if ([301, 307, 308].includes(res.status)) {
-      pass(`Route: /deal/drop-biryani-mar28 → redirect (${res.status})`);
+      pass(`Route: /deal/drop-biryani-apr07 → redirect (${res.status})`);
     } else if (res.status === 200) {
       // Might render the redirect page itself
-      pass("Route: /deal/drop-biryani-mar28 → 200 (server redirect)");
+      pass("Route: /deal/drop-biryani-apr07 → 200 (server redirect)");
     } else {
-      fail("Route: /deal/drop-biryani-mar28", `Expected redirect, got ${res.status}`);
+      fail("Route: /deal/drop-biryani-apr07", `Expected redirect, got ${res.status}`);
     }
   } catch (err) {
-    fail("Route: /deal/drop-biryani-mar28", err.message);
+    fail("Route: /deal/drop-biryani-apr07", err.message);
   }
 }
 
@@ -550,7 +550,7 @@ async function testPageRenders() {
 
   const pages = [
     { url: "/", expect: 200, contains: "Active Drops", name: "Homepage" },
-    { url: "/drop/drop-biryani-mar28", expect: 200, contains: "Biryani Night", name: "Drop page" },
+    { url: "/drop/drop-biryani-apr07", expect: 200, contains: "Biryani Night", name: "Drop page" },
     { url: "/ticket/success", expect: 200, contains: null, name: "Success page (no session)" },
     { url: "/biz/scan", expect: 200, contains: "Redeem", name: "Biz scan page" },
   ];
@@ -613,7 +613,7 @@ async function testCanaryFlow() {
     const spotsRes = await fetchWithRetry(`${BASE_URL}/api/spots`);
     const spotsData = await spotsRes.json();
     const spotsMap = spotsData.spots || spotsData;
-    if (spotsMap["drop-biryani-mar28"]) {
+    if (spotsMap["drop-biryani-apr07"]) {
       pass("Canary Step 2: GET /api/spots → drops exist");
     } else {
       fail("Canary Step 2", "No drops in spots response");
@@ -627,7 +627,7 @@ async function testCanaryFlow() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         phone: "+10000000099",
-        drop_item_id: "drop-biryani-mar28",
+        drop_item_id: "drop-biryani-apr07",
         quantity: 1,
       }),
     });
@@ -711,7 +711,7 @@ async function testDropConfig() {
   const data = await res.json();
 
   const spotsObj = data.spots || data;
-  const expectedDrops = ["drop-biryani-mar28", "drop-butterchicken-mar29", "drop-tandoori-mar30"];
+  const expectedDrops = ["drop-biryani-apr07", "drop-butterchicken-apr08", "drop-tandoori-apr09"];
 
   for (const id of expectedDrops) {
     if (spotsObj[id]) {
@@ -859,7 +859,7 @@ async function testQuantity() {
     const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: "+10000000003", drop_item_id: "drop-biryani-mar28", quantity: -1 }),
+      body: JSON.stringify({ phone: "+10000000003", drop_item_id: "drop-biryani-apr07", quantity: -1 }),
     });
     const data = await res.json();
     // Server clamps to 1, so should succeed or fail for other reasons
@@ -874,7 +874,7 @@ async function testQuantity() {
 
   // 13i: Drop page renders with qty param
   try {
-    const res = await fetchWithRetry(`${BASE_URL}/drop/drop-biryani-mar28?qty=2`);
+    const res = await fetchWithRetry(`${BASE_URL}/drop/drop-biryani-apr07?qty=2`);
     if (res.status === 200) {
       const html = await res.text();
       if (html.includes("Biryani Night")) {
@@ -1196,7 +1196,7 @@ async function testPhoneCapture() {
 
   // D. Drop page renders without phone (should show phone input area in HTML)
   try {
-    const res = await fetchWithRetry(`${BASE_URL}/drop/drop-biryani-mar28`);
+    const res = await fetchWithRetry(`${BASE_URL}/drop/drop-biryani-apr07`);
     const html = await res.text();
     if (res.status === 200 && html.includes("Biryani Night")) {
       pass("Phone capture: drop page renders for direct-landing user");
@@ -1212,7 +1212,7 @@ async function testPhoneCapture() {
     const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ drop_item_id: "drop-biryani-mar28", quantity: 1 }),
+      body: JSON.stringify({ drop_item_id: "drop-biryani-apr07", quantity: 1 }),
     });
     if (res.status === 400) {
       pass("Phone capture: checkout without phone → 400 rejected");
