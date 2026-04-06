@@ -163,27 +163,38 @@ export default function CaptureForm({ dark = false }: { dark?: boolean }) {
       </div>
 
       {/* Opt-in Checkbox */}
-      <div className="mt-3.5">
+      <div
+        className="mt-3.5 transition-all duration-200"
+        style={{
+          background: nameValid && phoneValid && !optIn ? "rgba(22,163,74,0.06)" : "rgba(22,163,74,0.04)",
+          border: `1.5px solid ${nameValid && phoneValid && !optIn ? "rgba(22,163,74,0.25)" : "rgba(22,163,74,0.1)"}`,
+          borderRadius: "var(--radius-lg)",
+          padding: "14px 14px",
+        }}
+      >
         <label
-          className="flex items-start gap-2.5 cursor-pointer"
+          className="flex items-center gap-3 cursor-pointer"
+          style={{ minHeight: "24px" }}
           onClick={() => setOptIn(!optIn)}
         >
           <div
-            className="w-5 h-5 rounded shrink-0 mt-0.5 flex items-center justify-center transition-all duration-150"
+            className="shrink-0 flex items-center justify-center transition-all duration-150"
             style={{
-              border: `2px solid ${optIn ? "var(--brand-primary)" : dark ? "var(--neutral-400)" : "var(--border-default)"}`,
+              width: "22px",
+              height: "22px",
+              borderRadius: "6px",
+              border: `2px solid ${optIn ? "var(--brand-primary)" : nameValid && phoneValid ? "var(--success)" : dark ? "var(--neutral-400)" : "var(--border-default)"}`,
               background: optIn ? "var(--brand-primary)" : "transparent",
             }}
           >
             {optIn && Icons.checkSmall}
           </div>
-          <span className="font-display text-xs leading-relaxed" style={{ color: dark ? "var(--text-muted)" : "var(--text-secondary)" }}>
-            I agree to receive exclusive deal alerts and promotions via RCS/SMS.
-            Message &amp; data rates may apply. Reply STOP to unsubscribe anytime.
+          <span className="font-display text-xs leading-snug" style={{ color: dark ? "var(--text-muted)" : "var(--text-secondary)" }}>
+            I agree to receive deal alerts via SMS. No spam. Reply STOP anytime.
           </span>
         </label>
         {nameValid && phoneValid && !optIn && (
-          <div className="font-display text-xs mt-1.5 pl-7" style={{ color: "var(--text-muted)" }}>Check the box to continue</div>
+          <div className="font-display text-xs mt-2 font-medium" style={{ color: "var(--success)", paddingLeft: "34px" }}>Check the box to continue</div>
         )}
       </div>
 

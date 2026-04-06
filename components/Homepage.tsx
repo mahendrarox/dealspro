@@ -245,17 +245,18 @@ function CaptureForm({ dark }) {
 
       {/* Opt-in checkbox */}
       <div style={{
-        background: T.color.n50,
-        border: `1px solid ${T.color.n200}`,
+        background: nameValid && phoneValid && !optIn ? "rgba(22,163,74,0.06)" : T.color.green50,
+        border: `1.5px solid ${nameValid && phoneValid && !optIn ? "rgba(22,163,74,0.25)" : "rgba(22,163,74,0.12)"}`,
         borderRadius: T.radius.lg,
-        padding: "14px 16px",
+        padding: "16px",
         marginBottom: "20px",
+        transition: `all ${T.tr.base}`,
       }}>
-        <label style={{ display: "flex", alignItems: "flex-start", gap: "12px", cursor: "pointer" }}
+        <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", minHeight: "24px" }}
           onClick={() => setOptIn(!optIn)}>
           <div style={{
-            width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0, marginTop: "1px",
-            border: `2px solid ${optIn ? T.color.red500 : T.color.n300}`,
+            width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0,
+            border: `2px solid ${optIn ? T.color.red500 : nameValid && phoneValid ? T.color.green500 : T.color.n300}`,
             background: optIn ? T.color.red500 : T.color.n0,
             display: "flex", alignItems: "center", justifyContent: "center",
             transition: `all ${T.tr.fast}`,
@@ -263,12 +264,12 @@ function CaptureForm({ dark }) {
           }}>
             {optIn && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
           </div>
-          <span style={{ fontFamily: T.font.display, fontSize: "13px", lineHeight: 1.5, color: T.color.n500 }}>
-            I agree to receive exclusive deal alerts and promotions via RCS/SMS. Message & data rates may apply. Reply STOP to unsubscribe anytime.
+          <span style={{ fontFamily: T.font.display, fontSize: "13px", lineHeight: 1.4, color: T.color.n500 }}>
+            I agree to receive deal alerts via SMS. No spam. Reply STOP anytime.
           </span>
         </label>
         {nameValid && phoneValid && !optIn && (
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "8px", paddingLeft: "36px" }}>Check the box to continue</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.green500, marginTop: "8px", paddingLeft: "36px", fontWeight: 500 }}>Check the box to continue</div>
         )}
       </div>
 
