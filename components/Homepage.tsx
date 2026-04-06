@@ -446,7 +446,7 @@ export default function App() {
         {!coords && !denied && (
           <div style={{ textAlign: "center", marginBottom: "24px" }}>
             <button onClick={requestLocation} disabled={locLoading} style={{ background: T.color.n0, border: `1px solid ${T.color.n200}`, borderRadius: T.radius.full, padding: "10px 20px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.n500, cursor: locLoading ? "default" : "pointer", transition: `all ${T.tr.base}`, boxShadow: T.shadow.sm }}>
-              {locLoading ? "Getting location..." : "📍 See deals near you"}
+              {locLoading ? "Getting location..." : "📍 Find deals closest to you"}
             </button>
           </div>
         )}

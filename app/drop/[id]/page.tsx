@@ -245,7 +245,7 @@ function DealPageInner() {
           {!coords && !denied && (
             <div style={{ textAlign: "center", marginBottom: "16px" }}>
               <button onClick={requestLocation} disabled={locLoading} style={{ background: T.n50, border: `1px solid ${T.n200}`, borderRadius: "9999px", padding: "8px 16px", fontFamily: T.display, fontSize: "12px", fontWeight: 600, color: T.n500, cursor: locLoading ? "default" : "pointer" }}>
-                {locLoading ? "Getting location..." : "📍 See distance to restaurant"}
+                {locLoading ? "Getting location..." : "📍 Find deals closest to you"}
               </button>
             </div>
           )}
