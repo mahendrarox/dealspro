@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Button from "./Button";
 import { Icons } from "./Icons";
 
@@ -13,6 +13,8 @@ function formatPhone(val: string): string {
 }
 
 export default function CaptureForm({ dark = false }: { dark?: boolean }) {
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { nameRef.current?.focus(); }, []);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [optIn, setOptIn] = useState(false);
@@ -76,6 +78,7 @@ export default function CaptureForm({ dark = false }: { dark?: boolean }) {
       <div className="mb-2.5">
         <div className="relative">
           <input
+            ref={nameRef}
             type="text"
             placeholder="Your first name"
             value={name}
@@ -126,6 +129,8 @@ export default function CaptureForm({ dark = false }: { dark?: boolean }) {
           </div>
           <input
             type="tel"
+            autoComplete="tel"
+            inputMode="tel"
             placeholder="(555) 123-4567"
             value={phone}
             onChange={(e) => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
@@ -181,6 +186,14 @@ export default function CaptureForm({ dark = false }: { dark?: boolean }) {
           <div className="font-display text-xs mt-1.5 pl-7" style={{ color: "var(--text-muted)" }}>Check the box to continue</div>
         )}
       </div>
+
+      {/* Eligibility message */}
+      {allValid && (
+        <div className="flex items-center justify-center gap-1.5 mt-3 animate-fade-up">
+          {Icons.checkGreen}
+          <span className="font-display text-[13px] font-semibold" style={{ color: "var(--success)" }}>You're eligible for today's deals!</span>
+        </div>
+      )}
 
       {/* Submit Button */}
       <div className="mt-3.5">

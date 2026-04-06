@@ -92,6 +92,8 @@ function Btn({ children, variant = "primary", full, disabled, onClick, style = {
 
 // ── Capture Form: Real-time validation ────────────────
 function CaptureForm({ dark }) {
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { nameRef.current?.focus(); }, []);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [optIn, setOptIn] = useState(false);
@@ -189,7 +191,7 @@ function CaptureForm({ dark }) {
           {nameValid && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
         </label>
         <div style={{ position: "relative" }}>
-          <input type="text" placeholder="e.g. Sarah" value={name}
+          <input ref={nameRef} type="text" placeholder="e.g. Sarah" value={name}
             onChange={e => { setName(e.target.value); if (!nameTouched) setNameTouched(true); }}
             onFocus={() => setFocus("name")} onBlur={() => { setFocus(null); setNameTouched(true); }}
             style={{ width: "100%", padding: "16px 44px 16px 16px", border: `2px solid ${nameBorder}`, borderRadius: T.radius.lg, fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: T.color.n900, background: inputBg, outline: "none", boxShadow: focus === "name" ? T.shadow.focus : "none", transition: `all ${T.tr.base}` }}
@@ -220,7 +222,7 @@ function CaptureForm({ dark }) {
             <img src="https://flagcdn.com/w40/us.png" alt="US" style={{ width: "20px", height: "14px", objectFit: "cover", borderRadius: "2px" }} />
             <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 700, color: T.color.n500 }}>+1</span>
           </div>
-          <input type="tel" placeholder="(555) 123-4567" value={phone}
+          <input type="tel" autoComplete="tel" inputMode="tel" placeholder="(555) 123-4567" value={phone}
             onChange={e => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
             onFocus={() => setFocus("phone")} onBlur={() => { setFocus(null); setPhoneTouched(true); }}
             onKeyDown={e => { if (e.key === "Enter" && allValid) submit(); }}
@@ -269,6 +271,14 @@ function CaptureForm({ dark }) {
           <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "8px", paddingLeft: "36px" }}>Check the box to continue</div>
         )}
       </div>
+
+      {/* Eligibility message */}
+      {allValid && (
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", justifyContent: "center", marginBottom: "12px", animation: "fadeUp 0.3s ease" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.green500 }}>You're eligible for today's deals!</span>
+        </div>
+      )}
 
       {/* Submit */}
       <button onClick={allValid && !loading ? submit : undefined} style={{
