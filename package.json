@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:regression": "node scripts/test-regression.js"
+    "test:regression": "node scripts/run-regression.js",
+    "test:regression:only": "node scripts/test-regression.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.2",
