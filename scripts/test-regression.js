@@ -1113,6 +1113,7 @@ async function main() {
     await testQuantity();
     await testCanaryQty2();
     await testPhoneCapture();
+    await testPhoneSearch();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -1226,6 +1227,113 @@ async function testPhoneCapture() {
   // Cleanup test users
   const supabase = getSupabase();
   await supabase.from("users").delete().in("phone", ["+10000000099", "+10000000098"]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 16: Phone Search on /biz/scan
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testPhoneSearch() {
+  console.log("\n── Test 16: Phone Search ──");
+
+  const supabase = getSupabase();
+  const phoneSearchPhone = "+10000000077";
+  const dropItemId = `test-phone-search-${testId()}`;
+  const qr = testId();
+  const sid = testId();
+
+  // Create a test order via RPC
+  const { data: order, error: createErr } = await supabase.rpc("create_order_atomic", {
+    p_stripe_session_id: sid,
+    p_phone: phoneSearchPhone,
+    p_drop_item_id: dropItemId,
+    p_drop_title: "Phone Search Test Deal",
+    p_restaurant_name: "Test Kitchen",
+    p_price_paid: 9.99,
+    p_quantity: 2,
+    p_qr_token: qr,
+    p_total_spots: 10,
+  });
+
+  if (createErr || !order) {
+    fail("Phone search: setup — create test order", createErr?.message || "no data");
+    return;
+  }
+
+  // A. Search by phone → should find the order
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/biz/phone-search?phone=${encodeURIComponent(phoneSearchPhone)}`);
+    const data = await res.json();
+    if (res.ok && data.orders && data.orders.some((o) => o.qr_token === qr)) {
+      pass("Phone search: returns pending order");
+    } else {
+      fail("Phone search: returns pending order", `orders: ${JSON.stringify(data.orders?.map((o) => o.qr_token))}`);
+    }
+  } catch (err) {
+    fail("Phone search: returns pending order", err.message);
+  }
+
+  // B. Search with raw 10-digit number (no +1) → should normalize
+  try {
+    const rawDigits = phoneSearchPhone.replace("+1", "");
+    const res = await fetchWithRetry(`${BASE_URL}/api/biz/phone-search?phone=${rawDigits}`);
+    const data = await res.json();
+    if (res.ok && data.orders && data.orders.some((o) => o.qr_token === qr)) {
+      pass("Phone search: normalizes 10-digit input");
+    } else {
+      fail("Phone search: normalizes 10-digit input", `orders count: ${data.orders?.length}`);
+    }
+  } catch (err) {
+    fail("Phone search: normalizes 10-digit input", err.message);
+  }
+
+  // C. Redeem the order, then search again → should NOT find it
+  try {
+    const { data: redeemResult, error: redeemErr } = await supabase.rpc("redeem_order_atomic", { p_qr_token: qr });
+    if (redeemErr) {
+      fail("Phone search: redeem for exclusion test", redeemErr.message);
+    } else {
+      const res = await fetchWithRetry(`${BASE_URL}/api/biz/phone-search?phone=${encodeURIComponent(phoneSearchPhone)}`);
+      const data = await res.json();
+      const found = data.orders && data.orders.some((o) => o.qr_token === qr);
+      if (!found) {
+        pass("Phone search: excludes redeemed orders");
+      } else {
+        fail("Phone search: excludes redeemed orders", "redeemed order still in results");
+      }
+    }
+  } catch (err) {
+    fail("Phone search: excludes redeemed orders", err.message);
+  }
+
+  // D. Search unknown phone → empty array
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/biz/phone-search?phone=+19999999999`);
+    const data = await res.json();
+    if (res.ok && Array.isArray(data.orders) && data.orders.length === 0) {
+      pass("Phone search: unknown phone → empty array");
+    } else {
+      fail("Phone search: unknown phone → empty array", `orders count: ${data.orders?.length}`);
+    }
+  } catch (err) {
+    fail("Phone search: unknown phone → empty array", err.message);
+  }
+
+  // E. Missing phone param → empty array
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/biz/phone-search`);
+    const data = await res.json();
+    if (res.ok && Array.isArray(data.orders) && data.orders.length === 0) {
+      pass("Phone search: missing param → empty array");
+    } else {
+      fail("Phone search: missing param → empty array", `orders count: ${data.orders?.length}`);
+    }
+  } catch (err) {
+    fail("Phone search: missing param → empty array", err.message);
+  }
+
+  // Cleanup
+  await supabase.from("orders").delete().eq("phone", phoneSearchPhone);
 }
 
 main();

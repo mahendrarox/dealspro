@@ -20,6 +20,7 @@ type Order = {
   restaurant_name: string;
   drop_item_id?: string;
   price_paid: number;
+  quantity?: number;
   status: string;
   redemption_status?: string;
   qr_token: string;
@@ -36,6 +37,14 @@ export default function ScanPage() {
   const [redeeming, setRedeeming] = useState(false);
   const [redeemError, setRedeemError] = useState("");
   const [redeemed, setRedeemed] = useState(false);
+
+  // Phone search state
+  const [phoneSearch, setPhoneSearch] = useState("");
+  const [phoneResults, setPhoneResults] = useState<Order[]>([]);
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [phoneError, setPhoneError] = useState("");
+  const [phoneSearched, setPhoneSearched] = useState(false);
+  const [phoneRedeeming, setPhoneRedeeming] = useState<string | null>(null);
 
   const lookUp = async () => {
     if (!token.trim()) return;
@@ -85,6 +94,57 @@ export default function ScanPage() {
       setRedeemError("Network error. Please try again.");
     }
     setRedeeming(false);
+  };
+
+  const searchByPhone = async () => {
+    if (!phoneSearch.trim()) return;
+    setPhoneLoading(true);
+    setPhoneError("");
+    setPhoneResults([]);
+    setPhoneSearched(true);
+
+    // Clear single-order view
+    setOrder(null);
+    setDropItem(null);
+    setError("");
+    setRedeemed(false);
+    setRedeemError("");
+
+    try {
+      const res = await fetch(`/api/biz/phone-search?phone=${encodeURIComponent(phoneSearch.trim())}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setPhoneError(data.error || "Search failed");
+      } else {
+        setPhoneResults(data.orders || []);
+      }
+    } catch {
+      setPhoneError("Network error. Please try again.");
+    }
+    setPhoneLoading(false);
+  };
+
+  const redeemFromPhone = async (phoneOrder: Order) => {
+    setPhoneRedeeming(phoneOrder.qr_token);
+
+    try {
+      const res = await fetch("/api/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: phoneOrder.qr_token }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPhoneError(data.error || "Redemption failed");
+      } else {
+        console.log("[Scan] Redeemed via phone search:", phoneOrder.qr_token);
+        // Remove the redeemed order from results
+        setPhoneResults((prev) => prev.filter((o) => o.qr_token !== phoneOrder.qr_token));
+      }
+    } catch {
+      setPhoneError("Network error. Please try again.");
+    }
+    setPhoneRedeeming(null);
   };
 
   return (
@@ -208,6 +268,175 @@ export default function ScanPage() {
             }}
           >
             {error}
+          </div>
+        )}
+      </div>
+
+      {/* Phone Search Card */}
+      <div
+        style={{
+          background: "#1C1C21",
+          borderRadius: "20px",
+          padding: "28px",
+          width: "100%",
+          maxWidth: "460px",
+          border: "1px solid rgba(255,255,255,0.06)",
+          marginBottom: "20px",
+        }}
+      >
+        <label
+          style={{
+            display: "block",
+            fontSize: "12px",
+            fontWeight: 600,
+            color: "#52525B",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            marginBottom: "8px",
+          }}
+        >
+          Or search by phone number
+        </label>
+        <input
+          type="tel"
+          placeholder="e.g. (214) 555-1234"
+          value={phoneSearch}
+          onChange={(e) => setPhoneSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") searchByPhone(); }}
+          style={{
+            width: "100%",
+            padding: "14px 16px",
+            background: "#111114",
+            border: "2px solid rgba(255,255,255,0.1)",
+            borderRadius: "12px",
+            color: "#FFFFFF",
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "13px",
+            outline: "none",
+            boxSizing: "border-box",
+            marginBottom: "12px",
+          }}
+        />
+        <button
+          onClick={searchByPhone}
+          disabled={phoneLoading || !phoneSearch.trim()}
+          style={{
+            width: "100%",
+            padding: "14px",
+            background: phoneSearch.trim() ? "#F93A25" : "#1C1C21",
+            border: phoneSearch.trim() ? "none" : "2px solid rgba(255,255,255,0.1)",
+            borderRadius: "12px",
+            color: phoneSearch.trim() ? "#FFFFFF" : "#52525B",
+            fontFamily: "'DM Sans', sans-serif",
+            fontWeight: 700,
+            fontSize: "15px",
+            cursor: phoneSearch.trim() ? "pointer" : "default",
+            transition: "all 200ms ease",
+          }}
+        >
+          {phoneLoading ? "Searching..." : "Search Orders"}
+        </button>
+
+        {phoneError && (
+          <div
+            style={{
+              marginTop: "12px",
+              padding: "12px 16px",
+              background: "rgba(249,58,37,0.1)",
+              border: "1px solid rgba(249,58,37,0.2)",
+              borderRadius: "10px",
+              color: "#F93A25",
+              fontSize: "13px",
+            }}
+          >
+            {phoneError}
+          </div>
+        )}
+
+        {/* Phone Search Results */}
+        {phoneSearched && !phoneLoading && phoneResults.length === 0 && !phoneError && (
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "14px 16px",
+              background: "rgba(255,255,255,0.03)",
+              borderRadius: "12px",
+              color: "#52525B",
+              fontSize: "13px",
+              textAlign: "center",
+            }}
+          >
+            No unredeemed orders found for this number
+          </div>
+        )}
+
+        {phoneResults.length > 0 && (
+          <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div
+              style={{
+                fontSize: "11px",
+                fontWeight: 600,
+                color: "#52525B",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              {phoneResults.length} unredeemed order{phoneResults.length !== 1 ? "s" : ""} found
+            </div>
+            {phoneResults.map((o) => (
+              <div
+                key={o.id}
+                style={{
+                  background: "#111114",
+                  borderRadius: "12px",
+                  padding: "14px 16px",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "12px",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      color: "#FFFFFF",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {o.drop_title}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#52525B", marginTop: "3px" }}>
+                    Qty: {o.quantity ?? 1} · {new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </div>
+                </div>
+                <button
+                  onClick={() => redeemFromPhone(o)}
+                  disabled={phoneRedeeming === o.qr_token}
+                  style={{
+                    padding: "8px 16px",
+                    background: "#16A34A",
+                    border: "none",
+                    borderRadius: "8px",
+                    color: "#FFFFFF",
+                    fontFamily: "'DM Sans', sans-serif",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: phoneRedeeming === o.qr_token ? "default" : "pointer",
+                    opacity: phoneRedeeming === o.qr_token ? 0.6 : 1,
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    transition: "opacity 150ms ease",
+                  }}
+                >
+                  {phoneRedeeming === o.qr_token ? "..." : "Redeem"}
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>
