@@ -427,8 +427,8 @@ export default function App() {
       {/* FOOD HERO IMAGE */}
       <section style={{ position: "relative", width: "100%", maxHeight: "420px", overflow: "hidden" }}>
         <Image
-          src="https://images.unsplash.com/photo-1574484284002-952d92456975?auto=format&fit=crop&w=2400&q=85"
-          alt="Overhead spread of biryani rice, naan bread, raita, and sides"
+          src="https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=2400&q=85"
+          alt="Overhead close-up of Indian biryani rice, naan, butter chicken, and sides on a warm table"
           width={2400}
           height={1350}
           sizes="100vw"
