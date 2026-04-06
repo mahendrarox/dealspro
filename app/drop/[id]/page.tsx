@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { DROP_ITEMS, type DropItem, getDropItem, canPurchase, isPickupInProgress, hasEnded, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, getSavings } from "@/lib/constants";
 import PhoneInput, { isPhoneValid, toE164 } from "@/components/PhoneInput";
+import { useUserLocation } from "@/lib/hooks/useUserLocation";
 
 const T = {
   red: "#F93A25", red50: "rgba(249,58,37,0.08)", green: "#16A34A",
@@ -24,6 +25,7 @@ function DealPageInner() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const initialQty = Math.min(4, Math.max(1, parseInt(searchParams.get("qty") || "1") || 1));
+  const { coords, denied, loading: locLoading, requestLocation, getDistance } = useUserLocation();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -221,6 +223,7 @@ function DealPageInner() {
             {item.title}
           </div>
           <div style={{ fontSize: "14px", color: T.n400 }}>{item.restaurant_name}</div>
+          <div style={{ fontSize: "12px", color: T.n400, marginTop: "4px" }}>📍 {item.address}{(() => { const d = getDistance(item.lat, item.lng); return d ? ` · ${d}` : ""; })()}</div>
         </div>
 
         {/* Deal Details */}
@@ -238,9 +241,19 @@ function DealPageInner() {
             </span>
           </div>
 
+          {/* Location prompt */}
+          {!coords && !denied && (
+            <div style={{ textAlign: "center", marginBottom: "16px" }}>
+              <button onClick={requestLocation} disabled={locLoading} style={{ background: T.n50, border: `1px solid ${T.n200}`, borderRadius: "9999px", padding: "8px 16px", fontFamily: T.display, fontSize: "12px", fontWeight: 600, color: T.n500, cursor: locLoading ? "default" : "pointer" }}>
+                {locLoading ? "Getting location..." : "📍 See distance to restaurant"}
+              </button>
+            </div>
+          )}
+
           {/* Info rows */}
           <div style={{ background: T.n50, borderRadius: "14px", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px", marginBottom: "24px" }}>
             <InfoRow icon="🏪" label="Restaurant" value={item.restaurant_name} />
+            <InfoRow icon="📍" label="Location" value={`${item.address}${(() => { const d = getDistance(item.lat, item.lng); return d ? ` · ${d}` : ""; })()}`} />
             <InfoRow icon="📅" label="When" value={getTimeContext(item)} />
             <InfoRow icon="💰" label="You Save" value={`$${(savings * quantity).toFixed(2)}`} highlight />
             {spotsRemaining !== null && (

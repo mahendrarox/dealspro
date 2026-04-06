@@ -5,6 +5,7 @@ import Image from "next/image";
 import { DROP_ITEMS, type DropItem, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
 import type { SpotsInfo } from "@/lib/spots";
 import { formatPhone } from "@/components/PhoneInput";
+import { useUserLocation } from "@/lib/hooks/useUserLocation";
 
 const T = {
   color: {
@@ -312,7 +313,7 @@ function CaptureForm({ dark }) {
   );
 }
 
-function DropCard({ item, spots, delay = 0 }: { item: DropItem; spots?: SpotsInfo; delay?: number }) {
+function DropCard({ item, spots, delay = 0, distance }: { item: DropItem; spots?: SpotsInfo; delay?: number; distance?: string | null }) {
   const [h, setH] = useState(false);
   const [ref, vis] = useInView();
   const remaining = spots?.remaining ?? item.total_spots;
@@ -341,6 +342,7 @@ function DropCard({ item, spots, delay = 0 }: { item: DropItem; spots?: SpotsInf
         <Badge>DROP</Badge>
         <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: "#fff", marginTop: "12px" }}>{item.title}</div>
         <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "11px", color: T.color.n400, marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
         <div style={{ fontFamily: T.font.mono, fontSize: "11px", color: T.color.n400, marginTop: "6px" }}>⏰ {formatTimeWindow(item)}</div>
       </div>
       <div style={{ padding: "20px" }}>
@@ -373,6 +375,7 @@ export default function App() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [spots, setSpots] = useState<Record<string, SpotsInfo>>({});
+  const { coords, denied, loading: locLoading, requestLocation, getDistance } = useUserLocation();
 
   const fetchSpots = useCallback(async () => {
     try {
@@ -420,7 +423,7 @@ export default function App() {
             <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Restaurant deals you can't find anywhere else. Dropped weekly. Claim before they sell out.</p>
             <CaptureForm dark />
           </div>
-          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={DROP_ITEMS[0]} spots={spots[DROP_ITEMS[0].id]} /></div></div>
+          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={DROP_ITEMS[0]} spots={spots[DROP_ITEMS[0].id]} distance={getDistance(DROP_ITEMS[0].lat, DROP_ITEMS[0].lng)} /></div></div>
         </div>
       </section>
 
@@ -439,7 +442,15 @@ export default function App() {
       </section>
 
       {/* ACTIVE DROPS */}
-      <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="This Week's Drops" title="Active Drops Near You" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px" }}>{DROP_ITEMS.map((item, i) => <DropCard key={item.id} item={item} spots={spots[item.id]} delay={i * 120} />)}</div></div></section>
+      <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="This Week's Drops" title="Active Drops Near You" />
+        {!coords && !denied && (
+          <div style={{ textAlign: "center", marginBottom: "24px" }}>
+            <button onClick={requestLocation} disabled={locLoading} style={{ background: T.color.n0, border: `1px solid ${T.color.n200}`, borderRadius: T.radius.full, padding: "10px 20px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.n500, cursor: locLoading ? "default" : "pointer", transition: `all ${T.tr.base}`, boxShadow: T.shadow.sm }}>
+              {locLoading ? "Getting location..." : "📍 See deals near you"}
+            </button>
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px" }}>{DROP_ITEMS.map((item, i) => <DropCard key={item.id} item={item} spots={spots[item.id]} delay={i * 120} distance={getDistance(item.lat, item.lng)} />)}</div></div></section>
 
       {/* HOW IT WORKS */}
       <section id="how-it-works" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="How It Works" title="Three Steps to Exclusive Deals" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "24px" }}>{[{ icon: Icon.phone, t: "Enter Your Name & Phone", d: "Sign up in 10 seconds. No app to download, no account to create." },{ icon: Icon.msg, t: "Get Weekly Deals", d: "Exclusive limited-time deals from local restaurants, delivered via text every week." },{ icon: Icon.qr, t: "Pay & Redeem", d: "Prepay online at the deal price. Show your QR code at the restaurant." }].map((s, i) => { const [r, v] = useInView(); return (<div key={i} ref={r} style={{ textAlign: "center", padding: "32px 24px", borderRadius: T.radius.xl, border: `1px solid ${T.color.n200}`, opacity: v ? 1 : 0, animation: v ? `fadeUp 0.5s ease ${i * 120}ms both` : "none" }}><div style={{ width: "60px", height: "60px", borderRadius: T.radius.xl, background: T.color.red50, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>{s.icon}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.red500, letterSpacing: "0.1em", marginBottom: "8px" }}>STEP {i + 1}</div><h3 style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "8px" }}>{s.t}</h3><p style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.6, color: T.color.n500 }}>{s.d}</p></div>); })}</div></div></section>

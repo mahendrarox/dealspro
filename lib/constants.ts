@@ -15,6 +15,9 @@ export interface DropItem {
   status: "live" | "sold_out" | "expired" | "cancelled";
   stripe_price_id: string; // empty for now — using price_data
   redemption_valid_until: string; // ISO datetime "YYYY-MM-DDTHH:MM:SS"
+  address: string; // e.g. "Frisco, TX"
+  lat: number; // latitude
+  lng: number; // longitude
 }
 
 // ─── Hardcoded Drop Items ─────────────────────────────────────────────
@@ -35,6 +38,9 @@ export const DROP_ITEMS: DropItem[] = [
     status: "live",
     stripe_price_id: "",
     redemption_valid_until: "2026-04-08T23:59:00",
+    address: "Frisco, TX",
+    lat: 33.1507,
+    lng: -96.8236,
   },
   {
     id: "drop-butterchicken-apr08",
@@ -51,6 +57,9 @@ export const DROP_ITEMS: DropItem[] = [
     status: "live",
     stripe_price_id: "",
     redemption_valid_until: "2026-04-09T23:59:00",
+    address: "Frisco, TX",
+    lat: 33.1507,
+    lng: -96.8236,
   },
   {
     id: "drop-tandoori-apr09",
@@ -67,6 +76,9 @@ export const DROP_ITEMS: DropItem[] = [
     status: "live",
     stripe_price_id: "",
     redemption_valid_until: "2026-04-10T23:59:00",
+    address: "Frisco, TX",
+    lat: 33.1507,
+    lng: -96.8236,
   },
 ];
 
