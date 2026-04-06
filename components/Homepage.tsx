@@ -184,8 +184,9 @@ function CaptureForm({ dark }) {
 
       {/* Name */}
       <div style={{ marginBottom: "16px" }}>
-        <label style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
           Your Name
+          {nameValid && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
         </label>
         <div style={{ position: "relative" }}>
           <input type="text" placeholder="e.g. Sarah" value={name}
@@ -203,12 +204,16 @@ function CaptureForm({ dark }) {
             </div>
           )}
         </div>
+        {!nameValid && focus === "name" && (
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "6px", paddingLeft: "2px" }}>Enter your name</div>
+        )}
       </div>
 
       {/* Phone */}
       <div style={{ marginBottom: "20px" }}>
-        <label style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
           Phone Number
+          {phoneValid && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
         </label>
         <div style={{ display: "flex", borderRadius: T.radius.lg, overflow: "hidden", border: `2px solid ${phoneBorder}`, boxShadow: focus === "phone" ? T.shadow.focus : "none", transition: `all ${T.tr.base}`, background: inputBg }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 14px", background: T.color.n200, borderRight: `1px solid ${T.color.n300}`, flexShrink: 0 }}>
@@ -231,6 +236,9 @@ function CaptureForm({ dark }) {
             </div>
           )}
         </div>
+        {!phoneValid && nameValid && (focus === "phone" || (!phoneTouched && !digits.length)) && (
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "6px", paddingLeft: "2px" }}>Enter your phone number</div>
+        )}
       </div>
 
       {/* Opt-in checkbox */}
@@ -257,6 +265,9 @@ function CaptureForm({ dark }) {
             I agree to receive exclusive deal alerts and promotions via RCS/SMS. Message & data rates may apply. Reply STOP to unsubscribe anytime.
           </span>
         </label>
+        {nameValid && phoneValid && !optIn && (
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "8px", paddingLeft: "36px" }}>Check the box to continue</div>
+        )}
       </div>
 
       {/* Submit */}

@@ -73,99 +73,114 @@ export default function CaptureForm({ dark = false }: { dark?: boolean }) {
   return (
     <div className="w-full max-w-[460px]">
       {/* Name Input */}
-      <div className="relative mb-2.5">
-        <input
-          type="text"
-          placeholder="Your first name"
-          value={name}
-          onChange={(e) => { setName(e.target.value); if (!nameTouched) setNameTouched(true); }}
-          onFocus={() => setFocus("name")}
-          onBlur={() => { setFocus(null); setNameTouched(true); }}
-          className="w-full font-display text-base font-medium outline-none transition-all duration-200"
-          style={{
-            padding: "14px 40px 14px 16px",
-            border: `2px solid ${nameBorder}`,
-            borderRadius: "var(--radius-lg)",
-            color: dark ? "var(--text-inverse)" : "var(--text-primary)",
-            background: dark ? "var(--neutral-800)" : "var(--surface-white)",
-            boxShadow: focus === "name" ? "var(--shadow-focus)" : "none",
-          }}
-        />
-        {nameTouched && (
-          <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
-            {nameValid ? Icons.checkGreen : Icons.warning}
-          </div>
+      <div className="mb-2.5">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Your first name"
+            value={name}
+            onChange={(e) => { setName(e.target.value); if (!nameTouched) setNameTouched(true); }}
+            onFocus={() => setFocus("name")}
+            onBlur={() => { setFocus(null); setNameTouched(true); }}
+            className="w-full font-display text-base font-medium outline-none transition-all duration-200"
+            style={{
+              padding: "14px 40px 14px 16px",
+              border: `2px solid ${nameBorder}`,
+              borderRadius: "var(--radius-lg)",
+              color: dark ? "var(--text-inverse)" : "var(--text-primary)",
+              background: dark ? "var(--neutral-800)" : "var(--surface-white)",
+              boxShadow: focus === "name" ? "var(--shadow-focus)" : "none",
+            }}
+          />
+          {nameTouched && (
+            <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
+              {nameValid ? Icons.checkGreen : Icons.warning}
+            </div>
+          )}
+        </div>
+        {!nameValid && focus === "name" && (
+          <div className="font-display text-xs mt-1.5 pl-0.5" style={{ color: "var(--text-muted)" }}>Enter your name</div>
         )}
       </div>
 
       {/* Phone Input */}
-      <div
-        className="flex overflow-hidden transition-all duration-200"
-        style={{
-          borderRadius: "var(--radius-lg)",
-          border: `2px solid ${phoneBorder}`,
-          boxShadow: focus === "phone" ? "var(--shadow-focus)" : "none",
-          background: dark ? "var(--neutral-800)" : "var(--surface-white)",
-        }}
-      >
+      <div>
         <div
-          className="flex items-center gap-1.5 px-3 shrink-0"
+          className="flex overflow-hidden transition-all duration-200"
           style={{
-            background: dark ? "var(--neutral-950)" : "var(--surface-off-white)",
-            borderRight: `1px solid ${dark ? "var(--neutral-800)" : "var(--border-subtle)"}`,
+            borderRadius: "var(--radius-lg)",
+            border: `2px solid ${phoneBorder}`,
+            boxShadow: focus === "phone" ? "var(--shadow-focus)" : "none",
+            background: dark ? "var(--neutral-800)" : "var(--surface-white)",
           }}
         >
-          <span className="text-base">🇺🇸</span>
-          <span className="font-mono text-sm font-bold" style={{ color: "var(--text-muted)" }}>+1</span>
-        </div>
-        <input
-          type="tel"
-          placeholder="(555) 123-4567"
-          value={phone}
-          onChange={(e) => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
-          onFocus={() => setFocus("phone")}
-          onBlur={() => { setFocus(null); setPhoneTouched(true); }}
-          onKeyDown={(e) => { if (e.key === "Enter" && allValid) submit(); }}
-          className="flex-1 font-display text-base font-medium outline-none min-w-0"
-          style={{
-            padding: "14px",
-            border: "none",
-            color: dark ? "var(--text-inverse)" : "var(--text-primary)",
-            background: "transparent",
-          }}
-        />
-        {phoneTouched && digits.length > 0 && (
-          <div className="flex items-center pr-3">
-            {phoneValid ? (
-              Icons.checkGreen
-            ) : (
-              <span className="font-mono text-[11px] font-bold" style={{ color: "var(--warning)" }}>
-                {digitsLeft} left
-              </span>
-            )}
+          <div
+            className="flex items-center gap-1.5 px-3 shrink-0"
+            style={{
+              background: dark ? "var(--neutral-950)" : "var(--surface-off-white)",
+              borderRight: `1px solid ${dark ? "var(--neutral-800)" : "var(--border-subtle)"}`,
+            }}
+          >
+            <span className="text-base">🇺🇸</span>
+            <span className="font-mono text-sm font-bold" style={{ color: "var(--text-muted)" }}>+1</span>
           </div>
+          <input
+            type="tel"
+            placeholder="(555) 123-4567"
+            value={phone}
+            onChange={(e) => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
+            onFocus={() => setFocus("phone")}
+            onBlur={() => { setFocus(null); setPhoneTouched(true); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && allValid) submit(); }}
+            className="flex-1 font-display text-base font-medium outline-none min-w-0"
+            style={{
+              padding: "14px",
+              border: "none",
+              color: dark ? "var(--text-inverse)" : "var(--text-primary)",
+              background: "transparent",
+            }}
+          />
+          {phoneTouched && digits.length > 0 && (
+            <div className="flex items-center pr-3">
+              {phoneValid ? (
+                Icons.checkGreen
+              ) : (
+                <span className="font-mono text-[11px] font-bold" style={{ color: "var(--warning)" }}>
+                  {digitsLeft} left
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        {!phoneValid && nameValid && (focus === "phone" || (!phoneTouched && !digits.length)) && (
+          <div className="font-display text-xs mt-1.5 pl-0.5" style={{ color: "var(--text-muted)" }}>Enter your phone number</div>
         )}
       </div>
 
       {/* Opt-in Checkbox */}
-      <label
-        className="flex items-start gap-2.5 mt-3.5 cursor-pointer"
-        onClick={() => setOptIn(!optIn)}
-      >
-        <div
-          className="w-5 h-5 rounded shrink-0 mt-0.5 flex items-center justify-center transition-all duration-150"
-          style={{
-            border: `2px solid ${optIn ? "var(--brand-primary)" : dark ? "var(--neutral-400)" : "var(--border-default)"}`,
-            background: optIn ? "var(--brand-primary)" : "transparent",
-          }}
+      <div className="mt-3.5">
+        <label
+          className="flex items-start gap-2.5 cursor-pointer"
+          onClick={() => setOptIn(!optIn)}
         >
-          {optIn && Icons.checkSmall}
-        </div>
-        <span className="font-display text-xs leading-relaxed" style={{ color: dark ? "var(--text-muted)" : "var(--text-secondary)" }}>
-          I agree to receive exclusive deal alerts and promotions via RCS/SMS.
-          Message &amp; data rates may apply. Reply STOP to unsubscribe anytime.
-        </span>
-      </label>
+          <div
+            className="w-5 h-5 rounded shrink-0 mt-0.5 flex items-center justify-center transition-all duration-150"
+            style={{
+              border: `2px solid ${optIn ? "var(--brand-primary)" : dark ? "var(--neutral-400)" : "var(--border-default)"}`,
+              background: optIn ? "var(--brand-primary)" : "transparent",
+            }}
+          >
+            {optIn && Icons.checkSmall}
+          </div>
+          <span className="font-display text-xs leading-relaxed" style={{ color: dark ? "var(--text-muted)" : "var(--text-secondary)" }}>
+            I agree to receive exclusive deal alerts and promotions via RCS/SMS.
+            Message &amp; data rates may apply. Reply STOP to unsubscribe anytime.
+          </span>
+        </label>
+        {nameValid && phoneValid && !optIn && (
+          <div className="font-display text-xs mt-1.5 pl-7" style={{ color: "var(--text-muted)" }}>Check the box to continue</div>
+        )}
+      </div>
 
       {/* Submit Button */}
       <div className="mt-3.5">
