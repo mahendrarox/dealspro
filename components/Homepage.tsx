@@ -411,7 +411,7 @@ export default function App() {
       {mobileNav && <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.5)" }} onClick={() => setMobileNav(false)}><div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: "280px", background: T.color.n0, padding: "24px" }} onClick={e => e.stopPropagation()}><button onClick={() => setMobileNav(false)} style={{ background: "none", border: "none", cursor: "pointer", position: "absolute", top: "20px", right: "20px", color: T.color.n900 }}>{Icon.close}</button><div style={{ display: "flex", flexDirection: "column", gap: "24px", marginTop: "48px" }}>{["How It Works", "For Restaurants", "For Creators"].map(l => <a key={l} href={`#${l.toLowerCase().replace(/\s+/g,"-")}`} onClick={() => setMobileNav(false)} style={{ fontFamily: T.font.display, fontSize: "18px", fontWeight: 600, color: T.color.n900, textDecoration: "none" }}>{l}</a>)}<a href="#get-deals" onClick={() => setMobileNav(false)} style={{ textDecoration: "none" }}><Btn full>Get Deals</Btn></a></div></div></div>}
 
       {/* HERO */}
-      <section style={{ background: `linear-gradient(170deg, ${T.color.n950} 0%, #0D0D10 60%, ${T.color.n800} 100%)`, padding: "120px 20px 80px", position: "relative", overflow: "hidden" }}>
+      <section style={{ background: `linear-gradient(170deg, ${T.color.n950} 0%, #0D0D10 60%, ${T.color.n800} 100%)`, padding: "80px 20px 80px", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, opacity: 0.03, backgroundImage: `radial-gradient(${T.color.n400} 1px, transparent 1px)`, backgroundSize: "24px 24px" }}/>
         <div style={{ position: "absolute", top: "-20%", right: "-10%", width: "500px", height: "500px", background: "radial-gradient(circle, rgba(249,58,37,0.08) 0%, transparent 70%)", borderRadius: "50%" }}/>
         <div className="hg" style={{ maxWidth: "1120px", margin: "0 auto", position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "60px", alignItems: "center" }}>
@@ -427,8 +427,8 @@ export default function App() {
       {/* FOOD HERO IMAGE */}
       <section style={{ position: "relative", width: "100%", maxHeight: "420px", overflow: "hidden" }}>
         <Image
-          src="https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=1600&q=80"
-          alt="Fresh biryani served at a local restaurant"
+          src="https://images.unsplash.com/photo-1633945274405-b6c8069047b0?auto=format&fit=crop&w=1600&q=80"
+          alt="Authentic hyderabadi biryani with saffron rice, garnish, and spices"
           width={1600}
           height={900}
           sizes="100vw"
