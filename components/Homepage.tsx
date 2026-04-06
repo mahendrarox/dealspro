@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Image from "next/image";
 import { DROP_ITEMS, type DropItem, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
 import type { SpotsInfo } from "@/lib/spots";
 import { formatPhone } from "@/components/PhoneInput";
@@ -421,6 +422,20 @@ export default function App() {
           </div>
           <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={DROP_ITEMS[0]} spots={spots[DROP_ITEMS[0].id]} /></div></div>
         </div>
+      </section>
+
+      {/* FOOD HERO IMAGE */}
+      <section style={{ position: "relative", width: "100%", maxHeight: "420px", overflow: "hidden" }}>
+        <Image
+          src="https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=1600&q=80"
+          alt="Fresh biryani served at a local restaurant"
+          width={1600}
+          height={900}
+          sizes="100vw"
+          priority={false}
+          style={{ width: "100%", height: "auto", display: "block", objectFit: "cover", maxHeight: "420px", borderRadius: "0 0 16px 16px" }}
+        />
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "50%", background: "linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%)", borderRadius: "0 0 16px 16px", pointerEvents: "none" }} />
       </section>
 
       {/* ACTIVE DROPS */}
