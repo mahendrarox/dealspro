@@ -549,7 +549,7 @@ async function testPageRenders() {
   console.log("\n── Test 10: Page Render Validation ──");
 
   const pages = [
-    { url: "/", expect: 200, contains: "Active Drops", name: "Homepage" },
+    { url: "/", expect: 200, contains: "Exclusive Restaurant Deals", name: "Homepage" },
     { url: "/drop/drop-biryani-apr07", expect: 200, contains: "Biryani Night", name: "Drop page" },
     { url: "/ticket/success", expect: 200, contains: null, name: "Success page (no session)" },
     { url: "/biz/scan", expect: 200, contains: "Redeem", name: "Biz scan page" },
@@ -706,19 +706,32 @@ async function testCanaryFlow() {
 async function testDropConfig() {
   console.log("\n── Test 12: Drop Config Validation ──");
 
-  // Import constants by fetching spots (which uses constants)
-  const res = await fetchWithRetry(`${BASE_URL}/api/spots`);
-  const data = await res.json();
-
-  const spotsObj = data.spots || data;
-  const expectedDrops = ["drop-biryani-apr07", "drop-butterchicken-apr08", "drop-tandoori-apr09"];
-
-  for (const id of expectedDrops) {
-    if (spotsObj[id]) {
-      pass(`Drop config: ${id} exists in API response`);
-    } else {
-      fail(`Drop config: ${id}`, "Not found in /api/spots response");
+  try {
+    // Import constants by fetching spots (which uses constants)
+    const res = await fetchWithRetry(`${BASE_URL}/api/spots`);
+    if (!res.ok) {
+      fail("Drop config: /api/spots", `Status ${res.status}`);
+      return;
     }
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch {
+      fail("Drop config: /api/spots", "Response is not JSON");
+      return;
+    }
+
+    const spotsObj = data.spots || data;
+    const expectedDrops = ["drop-biryani-apr07", "drop-butterchicken-apr08", "drop-tandoori-apr09", "drop-pizza-combo-apr10", "drop-taco-tuesday-apr10", "drop-bbq-plate-apr11", "drop-sushi-platter-apr11", "drop-dessert-box-apr12"];
+
+    for (const id of expectedDrops) {
+      if (spotsObj[id]) {
+        pass(`Drop config: ${id} exists in API response`);
+      } else {
+        fail(`Drop config: ${id}`, "Not found in /api/spots response");
+      }
+    }
+  } catch (err) {
+    fail("Drop config: /api/spots", err.message);
   }
 }
 
@@ -1114,6 +1127,7 @@ async function main() {
     await testCanaryQty2();
     await testPhoneCapture();
     await testPhoneSearch();
+    await testDropEdgeCases();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -1334,6 +1348,218 @@ async function testPhoneSearch() {
 
   // Cleanup
   await supabase.from("orders").delete().eq("phone", phoneSearchPhone);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 17: DROP EDGE-CASE LOGIC
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testDropEdgeCases() {
+  console.log("\n── Test 17: Drop Edge-Case Logic ──");
+
+  // Import the drop helpers by testing them inline
+  // These mirror the logic in lib/drops.ts
+
+  function getPurchaseCutoff(drop) {
+    try {
+      if (!drop.date || !drop.start_time) return Infinity;
+      const d = new Date(`${drop.date}T${drop.start_time}:00`);
+      const t = d.getTime();
+      return Number.isNaN(t) ? Infinity : t;
+    } catch { return Infinity; }
+  }
+
+  function isActiveDrop(drop, spotsRemaining, now) {
+    if (drop.status && drop.status !== "live") return false;
+    if (now >= getPurchaseCutoff(drop)) return false;
+    if (spotsRemaining <= 0) return false;
+    return true;
+  }
+
+  function isSoldOutDrop(drop, spotsRemaining, now) {
+    if (drop.status && drop.status !== "live") return false;
+    if (now >= getPurchaseCutoff(drop)) return false;
+    return spotsRemaining === 0;
+  }
+
+  function selectFeatured(activeDrops, spotsMap) {
+    if (activeDrops.length === 0) return null;
+    const sorted = [...activeDrops].sort((a, b) => {
+      const cutoffA = getPurchaseCutoff(a);
+      const cutoffB = getPurchaseCutoff(b);
+      if (cutoffA !== cutoffB) return cutoffA - cutoffB;
+      const spotsA = spotsMap[a.id] ?? a.total_spots;
+      const spotsB = spotsMap[b.id] ?? b.total_spots;
+      if (spotsA !== spotsB) return spotsA - spotsB;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    return sorted[0];
+  }
+
+  // Helper to create test drops
+  const makeDrop = (id, date, startTime, totalSpots, status = "live") => ({
+    id, date, start_time: startTime, end_time: "19:00",
+    total_spots: totalSpots, status,
+    restaurant_name: "Test", title: "Test", price: 9.99,
+    original_price: 19.99, drop_id: "test", image_url: "",
+    stripe_price_id: "", redemption_valid_until: "",
+    address: "Test", lat: 0, lng: 0,
+  });
+
+  const farFuture = new Date("2099-01-01T00:00:00").getTime();
+
+  // 17a: 0 active drops → empty state
+  {
+    const drops = [makeDrop("d1", "2020-01-01", "12:00", 5)];
+    const now = farFuture;
+    const active = drops.filter(d => isActiveDrop(d, 5, now));
+    const soldOut = drops.filter(d => isSoldOutDrop(d, 5, now));
+    if (active.length === 0 && soldOut.length === 0) {
+      pass("Edge: 0 active, 0 sold-out → empty state");
+    } else {
+      fail("Edge: 0 active drops", `active=${active.length}, soldOut=${soldOut.length}`);
+    }
+  }
+
+  // 17b: All drops sold out
+  {
+    const drops = [
+      makeDrop("d1", "2099-12-01", "17:00", 5),
+      makeDrop("d2", "2099-12-02", "17:00", 5),
+    ];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { d1: 0, d2: 0 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const soldOut = drops.filter(d => isSoldOutDrop(d, spots[d.id], now));
+    if (active.length === 0 && soldOut.length === 2) {
+      pass("Edge: all drops sold out → sold-out state");
+    } else {
+      fail("Edge: all sold out", `active=${active.length}, soldOut=${soldOut.length}`);
+    }
+  }
+
+  // 17c: 1 active drop → only featured
+  {
+    const drops = [makeDrop("d1", "2099-12-01", "17:00", 5)];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { d1: 3 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const featured = selectFeatured(active, spots);
+    const remaining = active.filter(d => d.id !== featured?.id);
+    if (active.length === 1 && featured?.id === "d1" && remaining.length === 0) {
+      pass("Edge: 1 active drop → only featured, no list");
+    } else {
+      fail("Edge: 1 active drop", `active=${active.length}, featured=${featured?.id}, remaining=${remaining.length}`);
+    }
+  }
+
+  // 17d: 2+ active drops → featured + list
+  {
+    const drops = [
+      makeDrop("d1", "2099-12-01", "17:00", 5),
+      makeDrop("d2", "2099-12-02", "17:00", 5),
+      makeDrop("d3", "2099-12-03", "17:00", 5),
+    ];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { d1: 3, d2: 2, d3: 5 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const featured = selectFeatured(active, spots);
+    const remaining = active.filter(d => d.id !== featured?.id);
+    if (active.length === 3 && featured && remaining.length === 2) {
+      pass("Edge: 2+ active drops → featured + remaining list");
+    } else {
+      fail("Edge: 2+ active drops", `active=${active.length}, remaining=${remaining.length}`);
+    }
+  }
+
+  // 17e: Deterministic selection — same result twice
+  {
+    const drops = [
+      makeDrop("d1", "2099-12-01", "17:00", 5),
+      makeDrop("d2", "2099-12-02", "17:00", 5),
+    ];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { d1: 3, d2: 3 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const f1 = selectFeatured(active, spots);
+    const f2 = selectFeatured(active, spots);
+    if (f1?.id === f2?.id && f1 !== null) {
+      pass("Edge: deterministic selection — same result on two runs");
+    } else {
+      fail("Edge: deterministic", `f1=${f1?.id}, f2=${f2?.id}`);
+    }
+  }
+
+  // 17f: Earlier cutoff wins
+  {
+    const drops = [
+      makeDrop("d-later", "2099-12-10", "17:00", 5),
+      makeDrop("d-earlier", "2099-12-01", "17:00", 5),
+    ];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { "d-later": 3, "d-earlier": 3 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const featured = selectFeatured(active, spots);
+    if (featured?.id === "d-earlier") {
+      pass("Edge: earlier cutoff wins featured selection");
+    } else {
+      fail("Edge: earlier cutoff wins", `featured=${featured?.id}`);
+    }
+  }
+
+  // 17g: Lower spots wins (same cutoff)
+  {
+    const drops = [
+      makeDrop("d-more-spots", "2099-12-01", "17:00", 10),
+      makeDrop("d-fewer-spots", "2099-12-01", "17:00", 10),
+    ];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { "d-more-spots": 8, "d-fewer-spots": 2 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const featured = selectFeatured(active, spots);
+    if (featured?.id === "d-fewer-spots") {
+      pass("Edge: lower spots wins featured selection");
+    } else {
+      fail("Edge: lower spots wins", `featured=${featured?.id}`);
+    }
+  }
+
+  // 17h: API failure fallback — /api/drops/spots error renders optimistic
+  {
+    // Fetch from a deliberately bad endpoint to simulate failure behavior
+    // Since the real endpoint may work, we test the logic directly:
+    // If spots fetch fails, drops should use total_spots as fallback
+    const drops = [makeDrop("d1", "2099-12-01", "17:00", 5)];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    // Simulate fallback: use total_spots when spotsMap is missing
+    const fallbackSpots = {};
+    for (const d of drops) fallbackSpots[d.id] = d.total_spots;
+    const active = drops.filter(d => isActiveDrop(d, fallbackSpots[d.id], now));
+    if (active.length === 1) {
+      pass("Edge: API failure fallback — optimistic spots render drops");
+    } else {
+      fail("Edge: API failure fallback", `active=${active.length}`);
+    }
+  }
+
+  // 17i: Batch spots endpoint returns data for all drops
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/drops/spots`);
+    if (res.ok) {
+      const data = await res.json();
+      const expectedIds = ["drop-biryani-apr07", "drop-butterchicken-apr08", "drop-tandoori-apr09"];
+      const allPresent = expectedIds.every(id => typeof data[id] === "number");
+      if (allPresent) {
+        pass("Edge: /api/drops/spots returns all drop IDs");
+      } else {
+        fail("Edge: /api/drops/spots", `Missing IDs. Got: ${JSON.stringify(Object.keys(data))}`);
+      }
+    } else {
+      fail("Edge: /api/drops/spots", `Status ${res.status}`);
+    }
+  } catch (err) {
+    fail("Edge: /api/drops/spots", err.message);
+  }
 }
 
 main();

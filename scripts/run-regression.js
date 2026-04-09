@@ -11,6 +11,12 @@ const { spawn } = require("child_process");
 const http = require("http");
 const path = require("path");
 
+// Load env vars so the dev server and test suite both inherit them
+require("dotenv").config({ path: path.resolve(__dirname, "..", ".env.local") });
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  require("dotenv").config({ path: path.resolve(__dirname, "..", "..", "..", "..", ".env.local") });
+}
+
 const PORT = 3000;
 const BASE_URL = `http://localhost:${PORT}`;
 const MAX_WAIT_MS = 90_000; // 90 seconds for dev server cold start

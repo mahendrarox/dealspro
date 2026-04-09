@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { DROP_ITEMS, type DropItem, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
-import type { SpotsInfo } from "@/lib/spots";
+import { DROP_ITEMS } from "@/lib/constants";
 import { formatPhone } from "@/components/PhoneInput";
 import { useUserLocation } from "@/lib/hooks/useUserLocation";
-import { haversineDistance } from "@/lib/utils/distance";
+import DropsSection, { DropCard, type DropsData } from "@/components/DropsSection";
 
 const T = {
   color: {
@@ -37,8 +36,6 @@ const css = `
   @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
   @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
   @keyframes checkPop { 0%{transform:scale(0);opacity:0} 60%{transform:scale(1.2);opacity:1} 100%{transform:scale(1);opacity:1} }
-  .carousel-scroll::-webkit-scrollbar { display: none; }
-  .carousel-scroll { scrollbar-width: none; }
 `;
 
 function useInView() {
@@ -316,55 +313,6 @@ function CaptureForm({ dark }) {
   );
 }
 
-function DropCard({ item, spots, delay = 0, distance }: { item: DropItem; spots?: SpotsInfo; delay?: number; distance?: string | null }) {
-  const [h, setH] = useState(false);
-  const [ref, vis] = useInView();
-  const remaining = spots?.remaining ?? item.total_spots;
-  const claimed = spots?.claimed ?? 0;
-  const sold = remaining <= 0;
-  const ended = hasEnded(item);
-  const pickupActive = isPickupInProgress(item);
-  const purchasable = canPurchase(item) && !sold;
-  const pct = getDiscountPct(item);
-  const timeCtx = getTimeContext(item);
-  const disabled = sold || ended || pickupActive;
-
-  let statusText = "";
-  let statusColor = T.color.amber500;
-  if (ended) { statusText = "This drop has ended"; statusColor = T.color.n400; }
-  else if (pickupActive) { statusText = "Ordering closed · Pickup in progress"; statusColor = T.color.n400; }
-  else if (sold) { statusText = "All spots claimed"; statusColor = T.color.n400; }
-  else { statusText = remaining <= 3 ? `🔥 Only ${remaining} left` : `🔥 ${claimed} claimed`; }
-
-  return (
-    <a href={`/drop/${item.id}`} style={{ textDecoration: "none", display: "block" }}>
-    <div ref={ref} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: disabled ? T.shadow.sm : h ? T.shadow.dealHover : T.shadow.deal, transform: h && !disabled ? "translateY(-4px)" : "none", transition: `all ${T.tr.spring}`, opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", position: "relative", filter: disabled ? "grayscale(0.3)" : "none", cursor: "pointer" }}>
-      <div style={{ background: `linear-gradient(135deg, ${T.color.n950}, ${T.color.n800})`, padding: "20px", position: "relative" }}>
-        {sold && !ended && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}><span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 800, letterSpacing: "0.15em", color: T.color.n400, textTransform: "uppercase", background: "rgba(0,0,0,0.6)", padding: "8px 20px", borderRadius: T.radius.full }}>SOLD OUT</span></div>}
-        <Badge>DROP</Badge>
-        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: "#fff", marginTop: "12px" }}>{item.title}</div>
-        <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
-        <div style={{ fontFamily: T.font.display, fontSize: "11px", color: T.color.n400, marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
-        <div style={{ fontFamily: T.font.mono, fontSize: "11px", color: T.color.n400, marginTop: "6px" }}>⏰ {formatTimeWindow(item)}</div>
-      </div>
-      <div style={{ padding: "20px" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: T.font.mono, fontSize: "36px", fontWeight: 800, color: T.color.red500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
-          <span style={{ fontFamily: T.font.mono, fontSize: "18px", color: T.color.n400, textDecoration: "line-through" }}>${item.original_price.toFixed(2)}</span>
-          <Badge type="savings">{pct}% OFF</Badge>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: statusColor }}>{statusText}</span>
-          {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.red500, background: T.color.red50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
-        </div>
-        <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : sold ? "Sold Out" : "Ordering Closed") : `Claim Spot for $${item.price.toFixed(2)}`}</Btn>
-      </div>
-    </div>
-    </a>
-  );
-}
-
 const Icon = {
   phone: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.red500} strokeWidth="1.5"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>,
   msg: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.red500} strokeWidth="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
@@ -377,47 +325,13 @@ const Icon = {
 export default function App() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
-  const [spots, setSpots] = useState<Record<string, SpotsInfo>>({});
-  const { coords, denied, loading: locLoading, requestLocation, getDistance } = useUserLocation();
+  const [dropsData, setDropsData] = useState<DropsData>({ featured: null, spotsMap: {}, loading: true });
+  const { getDistance } = useUserLocation();
 
-  // Featured drop selection: soonest expiring → lowest remaining → closest
-  const { featuredDrop, carouselDrops } = useMemo(() => {
-    const active = DROP_ITEMS.filter(item => !hasEnded(item));
-    if (active.length === 0) return { featuredDrop: DROP_ITEMS[0], carouselDrops: [] };
-
-    const sorted = [...active].sort((a, b) => {
-      const endA = new Date(`${a.date}T${a.end_time}:00`).getTime();
-      const endB = new Date(`${b.date}T${b.end_time}:00`).getTime();
-      if (endA !== endB) return endA - endB;
-
-      const remA = spots[a.id]?.remaining ?? a.total_spots;
-      const remB = spots[b.id]?.remaining ?? b.total_spots;
-      if (remA !== remB) return remA - remB;
-
-      if (coords) {
-        const dA = haversineDistance(coords.lat, coords.lng, a.lat, a.lng);
-        const dB = haversineDistance(coords.lat, coords.lng, b.lat, b.lng);
-        return dA - dB;
-      }
-      return 0;
-    });
-
-    return { featuredDrop: sorted[0], carouselDrops: sorted.slice(1) };
-  }, [spots, coords]);
-
-  const fetchSpots = useCallback(async () => {
-    try {
-      const res = await fetch("/api/spots");
-      const data = await res.json();
-      if (data.spots) setSpots(data.spots);
-    } catch { /* silent */ }
-  }, []);
-
-  useEffect(() => {
-    fetchSpots();
-    const iv = setInterval(fetchSpots, 30000);
-    return () => clearInterval(iv);
-  }, [fetchSpots]);
+  // Featured drop for hero: show card only when an active featured drop exists (or while loading)
+  const showHeroCard = dropsData.loading || dropsData.featured !== null;
+  const featuredDrop = dropsData.featured ?? DROP_ITEMS[0];
+  const featuredSpots = dropsData.spotsMap[featuredDrop.id] ?? featuredDrop.total_spots;
 
   useEffect(() => { const fn = () => setScrolled(window.scrollY > 60); window.addEventListener("scroll", fn, { passive: true }); return () => window.removeEventListener("scroll", fn); }, []);
 
@@ -445,13 +359,15 @@ export default function App() {
       <section style={{ background: `linear-gradient(170deg, ${T.color.n950} 0%, #0D0D10 60%, ${T.color.n800} 100%)`, padding: "80px 20px 80px", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, opacity: 0.03, backgroundImage: `radial-gradient(${T.color.n400} 1px, transparent 1px)`, backgroundSize: "24px 24px" }}/>
         <div style={{ position: "absolute", top: "-20%", right: "-10%", width: "500px", height: "500px", background: "radial-gradient(circle, rgba(249,58,37,0.08) 0%, transparent 70%)", borderRadius: "50%" }}/>
-        <div className="hg" style={{ maxWidth: "1120px", margin: "0 auto", position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "60px", alignItems: "center" }}>
+        <div className="hg" style={{ maxWidth: "1120px", margin: "0 auto", position: "relative", display: "grid", gridTemplateColumns: showHeroCard ? "1fr 1fr" : "1fr", gap: "60px", alignItems: "center" }}>
           <div style={{ animation: "fadeUp 0.6s ease both" }}>
             <h1 style={{ fontFamily: T.font.display, fontSize: "clamp(28px, 5vw, 44px)", fontWeight: 800, lineHeight: 1.15, letterSpacing: "-0.03em", color: "#fff", marginBottom: "20px" }}>Exclusive Restaurant Deals. <span style={{ color: T.color.red500 }}>Limited Drops.</span> Sent to Your Phone.</h1>
             <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Restaurant deals you can't find anywhere else. Dropped weekly. Claim before they sell out.</p>
             <CaptureForm dark />
           </div>
-          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={featuredDrop} spots={spots[featuredDrop.id]} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} /></div></div>
+          {showHeroCard && (
+            <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={featuredDrop} spotsRemaining={featuredSpots} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} /></div></div>
+          )}
         </div>
       </section>
 
@@ -469,18 +385,8 @@ export default function App() {
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "50%", background: "linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%)", borderRadius: "0 0 16px 16px", pointerEvents: "none" }} />
       </section>
 
-      {/* ACTIVE DROPS — Carousel (only if 2+ drops) */}
-      {carouselDrops.length > 0 && (
-      <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="This Week's Drops" title="Active Drops Near You" />
-        {!coords && !denied && (
-          <div style={{ textAlign: "center", marginBottom: "24px" }}>
-            <button onClick={requestLocation} disabled={locLoading} style={{ background: T.color.n0, border: `1px solid ${T.color.n200}`, borderRadius: T.radius.full, padding: "10px 20px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.n500, cursor: locLoading ? "default" : "pointer", transition: `all ${T.tr.base}`, boxShadow: T.shadow.sm }}>
-              {locLoading ? "Getting location..." : "📍 Find deals closest to you"}
-            </button>
-          </div>
-        )}
-        <div className="carousel-scroll" style={{ display: "flex", gap: "20px", overflowX: "auto", scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch", paddingBottom: "8px" }}>{carouselDrops.map((item, i) => <div key={item.id} style={{ flex: "0 0 320px", maxWidth: "85vw", scrollSnapAlign: "start" }}><DropCard item={item} spots={spots[item.id]} delay={i * 120} distance={getDistance(item.lat, item.lng)} /></div>)}</div></div></section>
-      )}
+      {/* ACTIVE DROPS — DropsSection handles all edge cases */}
+      <DropsSection drops={DROP_ITEMS} onData={setDropsData} />
 
       {/* HOW IT WORKS */}
       <section id="how-it-works" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="How It Works" title="Three Steps to Exclusive Deals" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "24px" }}>{[{ icon: Icon.phone, t: "Enter Your Name & Phone", d: "Sign up in 10 seconds. No app to download, no account to create." },{ icon: Icon.msg, t: "Get Weekly Deals", d: "Exclusive limited-time deals from local restaurants, delivered via text every week." },{ icon: Icon.qr, t: "Pay & Redeem", d: "Prepay online at the deal price. Show your QR code at the restaurant." }].map((s, i) => { const [r, v] = useInView(); return (<div key={i} ref={r} style={{ textAlign: "center", padding: "32px 24px", borderRadius: T.radius.xl, border: `1px solid ${T.color.n200}`, opacity: v ? 1 : 0, animation: v ? `fadeUp 0.5s ease ${i * 120}ms both` : "none" }}><div style={{ width: "60px", height: "60px", borderRadius: T.radius.xl, background: T.color.red50, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>{s.icon}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.red500, letterSpacing: "0.1em", marginBottom: "8px" }}>STEP {i + 1}</div><h3 style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "8px" }}>{s.t}</h3><p style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.6, color: T.color.n500 }}>{s.d}</p></div>); })}</div></div></section>
