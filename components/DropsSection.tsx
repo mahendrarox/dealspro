@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { DropItem } from "@/lib/constants";
 import {
   formatTimeWindow,
@@ -79,7 +79,6 @@ function Btn({ children, full, disabled }: { children: React.ReactNode; full?: b
 export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFold = false }: { item: DropItem; spotsRemaining: number; delay?: number; distance?: string | null; isAboveFold?: boolean }) {
   const [h, setH] = useState(false);
   const [ref, vis] = useInView();
-  const overlayRef = useRef<HTMLDivElement>(null);
   const remaining = spotsRemaining;
   const claimed = item.total_spots - remaining;
   const sold = remaining <= 0;
@@ -90,13 +89,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
   const disabled = sold || ended || pickupActive;
 
   const hasImage = !!item.image_url;
-
-  const handleImageLoad = () => {
-    const el = overlayRef.current;
-    if (el && document.contains(el)) {
-      el.style.opacity = "1";
-    }
-  };
+  const dimmed = disabled ? 0.5 : 1;
 
   let statusText = "";
   let statusColor = T.color.amber500;
@@ -105,65 +98,48 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
   else if (sold) { statusText = "All spots claimed"; statusColor = T.color.n400; }
   else { statusText = remaining <= 3 ? `🔥 Only ${remaining} left` : `🔥 ${claimed} claimed`; }
 
-  // Text clamp style for title
-  const textClamp: React.CSSProperties = { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden", lineClamp: 2 } as React.CSSProperties;
-
   return (
     <a href={`/drop/${item.id}`} style={{ textDecoration: "none", display: "block" }}>
     <div ref={ref} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: disabled ? T.shadow.sm : h ? T.shadow.dealHover : T.shadow.deal, transform: h && !disabled ? "translateY(-4px)" : "none", transition: `all ${T.tr.spring}`, opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", position: "relative", filter: disabled ? "grayscale(0.3)" : "none", cursor: "pointer" }}>
-      {/* Image container — always present */}
-      <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", overflow: "hidden", background: "linear-gradient(135deg, #1f2937, #374151)" }}>
-        {/* Image element — only if URL exists */}
+      style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: disabled ? T.shadow.sm : h ? T.shadow.dealHover : T.shadow.deal, transform: h && !disabled ? "translateY(-4px)" : "none", transition: `all ${T.tr.spring}`, opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", cursor: "pointer" }}>
+      {/* ── Image section ── */}
+      <div style={{ position: "relative", width: "100%", height: 200, overflow: "hidden", background: "linear-gradient(135deg, #1f2937, #374151)" }}>
         {hasImage && (
           <img
             src={item.image_url}
             alt={item.title}
             loading={isAboveFold ? "eager" : "lazy"}
             fetchPriority={isAboveFold ? "high" : "auto"}
-            onLoad={handleImageLoad}
             onError={(e) => { e.currentTarget.style.display = "none"; }}
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
+            style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
           />
         )}
-        {/* Gradient overlay — always rendered, hidden until image loads */}
-        <div
-          ref={overlayRef}
-          style={{
-            position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none",
-            opacity: sold ? 1 : hasImage ? 0 : 1,
-            transition: sold ? "none" : "opacity 120ms ease-out",
-            background: "linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.45) 40%, rgba(0,0,0,0.2) 70%, rgba(0,0,0,0) 100%)",
-          }}
-        />
-        {/* Sold-out dim layer — z-2 */}
-        {sold && !ended && (
-          <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 800, letterSpacing: "0.15em", color: T.color.n400, textTransform: "uppercase", background: "rgba(0,0,0,0.6)", padding: "8px 20px", borderRadius: T.radius.full }}>SOLD OUT</span>
-          </div>
-        )}
-        {/* DROP badge — z-5 */}
-        <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}>
+        {/* DROP badge — only overlay on image */}
+        <div style={{ position: "absolute", top: 12, left: 12, zIndex: 2 }}>
           <Badge>DROP</Badge>
         </div>
-        {/* Text block — z-3 */}
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 3, padding: "12px 14px" }}>
-          <div style={{ ...textClamp, fontFamily: T.font.display, fontSize: "16px", fontWeight: 600, color: sold ? "rgba(255,255,255,0.7)" : "#FFFFFF", textShadow: "0 1px 2px rgba(0,0,0,0.6)", transition: "color 200ms ease", marginTop: "4px" }}>{item.title}</div>
-          <div style={{ fontFamily: T.font.display, fontSize: "13px", color: sold ? "rgba(229,229,229,0.6)" : "rgba(229,229,229,0.85)", textShadow: "0 1px 2px rgba(0,0,0,0.4)", transition: "color 200ms ease", marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
-          <div style={{ fontFamily: T.font.display, fontSize: "11px", color: sold ? "rgba(229,229,229,0.6)" : "rgba(229,229,229,0.85)", textShadow: "0 1px 2px rgba(0,0,0,0.4)", transition: "color 200ms ease", marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
-          <div style={{ fontFamily: T.font.mono, fontSize: "11px", color: sold ? "rgba(229,229,229,0.6)" : "rgba(229,229,229,0.85)", textShadow: "0 1px 2px rgba(0,0,0,0.4)", transition: "color 200ms ease", marginTop: "6px" }}>⏰ {formatTimeWindow(item)}</div>
-        </div>
       </div>
-      <div style={{ padding: "20px" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: T.font.mono, fontSize: "36px", fontWeight: 800, color: T.color.red500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
-          <span style={{ fontFamily: T.font.mono, fontSize: "18px", color: T.color.n400, textDecoration: "line-through" }}>${item.original_price.toFixed(2)}</span>
+      {/* ── Content section ── */}
+      <div style={{ padding: "14px 16px" }}>
+        {/* Title + meta */}
+        <div style={{ opacity: dimmed }}>
+          <div style={{ fontFamily: T.font.display, fontSize: "18px", fontWeight: 600, color: T.color.n900, lineHeight: 1.3 }}>{item.title}</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n500, marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
+          <div style={{ fontFamily: T.font.mono, fontSize: "12px", color: T.color.n400, marginTop: "4px" }}>⏰ {formatTimeWindow(item)}</div>
+        </div>
+        {/* Pricing */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
+          <span style={{ fontFamily: T.font.mono, fontSize: "32px", fontWeight: 800, color: T.color.red500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
+          <span style={{ fontFamily: T.font.mono, fontSize: "16px", color: T.color.n400, textDecoration: "line-through" }}>${item.original_price.toFixed(2)}</span>
           <Badge type="savings">{pct}% OFF</Badge>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+        {/* Engagement + time */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", marginBottom: "14px" }}>
           <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: statusColor }}>{statusText}</span>
           {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.red500, background: T.color.red50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
         </div>
+        {/* CTA */}
         <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : sold ? "Sold Out" : "Ordering Closed") : `Claim Spot for $${item.price.toFixed(2)}`}</Btn>
       </div>
     </div>
