@@ -167,7 +167,7 @@ function DealPageInner() {
       </div>
 
       {/* ── Content ── */}
-      <div style={{ padding: "20px 20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+      <div style={{ padding: "20px 20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
 
         {/* ── 2) TITLE + META ── */}
         <div>
@@ -217,9 +217,6 @@ function DealPageInner() {
             }} />
           </div>
         </div>
-
-        {/* Spacer */}
-        <div style={{ flex: 1 }} />
 
         {/* Error */}
         {error && (
