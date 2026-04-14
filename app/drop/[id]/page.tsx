@@ -214,17 +214,40 @@ function DealPageInner() {
         background: T.n0, borderRadius: "24px", overflow: "hidden",
         width: "100%", maxWidth: "420px", boxShadow: "0 8px 40px rgba(0,0,0,0.10)",
       }}>
-        {/* Header */}
-        <div style={{ background: `linear-gradient(135deg, ${T.n950}, #1C1C21)`, padding: "32px 28px 24px" }}>
-          <div style={{ fontFamily: T.mono, fontSize: "10px", fontWeight: 800, letterSpacing: "0.12em", color: T.red, textTransform: "uppercase", marginBottom: "10px" }}>
-            {cancelled ? "⚠️ Cancelled" : `🔥 Limited Drop · ${getTimeContext(item)}`}
+        {/* Hero image + header */}
+        {item.image_url ? (
+          <div style={{ position: "relative" }}>
+            <div style={{ width: "100%", aspectRatio: "4 / 3", overflow: "hidden" }}>
+              <img
+                src={item.image_url}
+                alt={item.title}
+                style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
+              />
+            </div>
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.3) 40%, transparent 60%)" }} />
+            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "28px 28px 24px" }}>
+              <div style={{ fontFamily: T.mono, fontSize: "10px", fontWeight: 800, letterSpacing: "0.12em", color: T.red, textTransform: "uppercase", marginBottom: "10px" }}>
+                {cancelled ? "⚠️ Cancelled" : `🔥 Limited Drop · ${getTimeContext(item)}`}
+              </div>
+              <div style={{ fontSize: "24px", fontWeight: 800, color: T.n0, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: "6px" }}>
+                {item.title}
+              </div>
+              <div style={{ fontSize: "14px", color: "rgba(255,255,255,0.7)" }}>{item.restaurant_name}</div>
+              <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.7)", marginTop: "4px" }}>📍 {item.address}{(() => { const d = getDistance(item.lat, item.lng); return d ? ` · ${d}` : ""; })()}</div>
+            </div>
           </div>
-          <div style={{ fontSize: "24px", fontWeight: 800, color: T.n0, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: "6px" }}>
-            {item.title}
+        ) : (
+          <div style={{ background: `linear-gradient(135deg, ${T.n950}, #1C1C21)`, padding: "32px 28px 24px" }}>
+            <div style={{ fontFamily: T.mono, fontSize: "10px", fontWeight: 800, letterSpacing: "0.12em", color: T.red, textTransform: "uppercase", marginBottom: "10px" }}>
+              {cancelled ? "⚠️ Cancelled" : `🔥 Limited Drop · ${getTimeContext(item)}`}
+            </div>
+            <div style={{ fontSize: "24px", fontWeight: 800, color: T.n0, letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: "6px" }}>
+              {item.title}
+            </div>
+            <div style={{ fontSize: "14px", color: T.n400 }}>{item.restaurant_name}</div>
+            <div style={{ fontSize: "12px", color: T.n400, marginTop: "4px" }}>📍 {item.address}{(() => { const d = getDistance(item.lat, item.lng); return d ? ` · ${d}` : ""; })()}</div>
           </div>
-          <div style={{ fontSize: "14px", color: T.n400 }}>{item.restaurant_name}</div>
-          <div style={{ fontSize: "12px", color: T.n400, marginTop: "4px" }}>📍 {item.address}{(() => { const d = getDistance(item.lat, item.lng); return d ? ` · ${d}` : ""; })()}</div>
-        </div>
+        )}
 
         {/* Deal Details */}
         <div style={{ padding: "28px" }}>
