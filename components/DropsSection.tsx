@@ -200,7 +200,7 @@ function SectionHeader({ label, title }: { label: string; title: string }) {
 
 function Shimmer() {
   return (
-    <div style={{ maxWidth: "375px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "20px" }}>
+    <div style={{ maxWidth: "400px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "20px" }}>
       <style>{`@keyframes shimmer { 0% { opacity: 0.4; } 100% { opacity: 0.7; } }`}</style>
       {[0, 1].map((i) => (
         <div key={i} style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}` }}>
@@ -377,7 +377,7 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
             </button>
           </div>
         )}
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px", maxWidth: "375px", width: "100%", margin: "0 auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px", maxWidth: "400px", width: "100%", margin: "0 auto" }}>
           {remaining.map((item, i) => (
             <DropCard
               key={item.id}

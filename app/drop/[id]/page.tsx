@@ -1,19 +1,15 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import { getDropItem, formatTimeWindow, formatDate, getTimeContext, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
 
 const T = {
   red: "#F93A25",
   green: "#16A34A",
   amber: "#D97706",
-  n0: "#FFFFFF",
-  n50: "#F7F7F8",
-  n200: "#E4E4E7",
   n400: "#A1A1AA",
-  n500: "#52525B",
-  n900: "#18181B",
+  n500: "#71717A",
   display: "'DM Sans', sans-serif",
   mono: "'JetBrains Mono', monospace",
 };
@@ -61,9 +57,9 @@ function DealPageInner() {
   // ── Not found ──
   if (!item) {
     return (
-      <div style={{ minHeight: "100vh", background: T.n50, fontFamily: T.display, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ minHeight: "100vh", background: "#0A0A0A", fontFamily: T.display, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center" }}>
-          <h1 style={{ fontSize: "24px", fontWeight: 700, color: T.n900, marginBottom: "12px" }}>Deal Not Found</h1>
+          <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#fff", marginBottom: "12px" }}>Deal Not Found</h1>
           <a href="/" style={{ color: T.red, textDecoration: "none", fontWeight: 600 }}>← Back to DealsPro</a>
         </div>
       </div>
@@ -72,6 +68,7 @@ function DealPageInner() {
 
   // ── Derived state ──
   const remaining = spotsRemaining ?? item.total_spots;
+  const claimed = item.total_spots - remaining;
   const sold = remaining <= 0;
   const ended = hasEnded(item);
   const pickupActive = isPickupInProgress(item);
@@ -80,24 +77,28 @@ function DealPageInner() {
   const pct = getDiscountPct(item);
   const hasImage = !!item.image_url;
 
-  // Scarcity bar
+  // Scarcity
   const spotsTotal = item.total_spots;
   const fillPct = spotsTotal > 0 ? ((spotsTotal - remaining) / spotsTotal) * 100 : 100;
-  const barColor = sold ? T.red : remaining / spotsTotal > 0.5 ? T.green : remaining / spotsTotal > 0.25 ? T.amber : T.red;
+  const barColor = sold ? "#666" : remaining / spotsTotal > 0.5 ? T.green : remaining / spotsTotal > 0.25 ? T.amber : T.red;
 
-  // Meta line
-  const dayName = formatDate(item).split(",")[0]; // e.g. "Tuesday"
+  // Scarcity text
+  let scarcityText = "";
+  if (sold) scarcityText = `${claimed} claimed · Sold Out`;
+  else if (remaining === 1) scarcityText = `🔥 ${claimed} claimed · Last spot!`;
+  else if (remaining === 2) scarcityText = `🔥 ${claimed} claimed · Only 2 left`;
+  else if (remaining <= 5) scarcityText = `${claimed} claimed · Going fast · ${remaining} left`;
+  else scarcityText = `${claimed} claimed · ${remaining} left`;
+
+  // Meta
+  const dayName = formatDate(item).split(",")[0];
   const timeWindow = formatTimeWindow(item);
-  const metaLine = `${item.restaurant_name} · ${dayName} · ${timeWindow}`;
 
   // ── Claim handler ──
   const handleClaim = async () => {
     setLoading(true);
     setError("");
-
-    // Haptic feedback
     try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
-
     try {
       const res = await fetch("/api/checkout", {
         method: "POST",
@@ -118,7 +119,6 @@ function DealPageInner() {
     }
   };
 
-  // ── CTA text ──
   const ctaText = loading
     ? "Redirecting..."
     : disabled
@@ -128,8 +128,7 @@ function DealPageInner() {
   return (
     <div style={{
       minHeight: "100vh",
-      minHeight: "100dvh" as string,
-      background: T.n0,
+      background: "#0A0A0A",
       fontFamily: T.display,
       display: "flex",
       flexDirection: "column",
@@ -137,21 +136,23 @@ function DealPageInner() {
       {/* Redirect overlay */}
       {showConfirm && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100,
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 100,
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          <div style={{ background: T.n0, borderRadius: "16px", padding: "32px 24px", textAlign: "center", maxWidth: "300px" }}>
+          <div style={{ background: "#1a1a1a", borderRadius: "16px", padding: "32px 24px", textAlign: "center", maxWidth: "300px", border: "1px solid rgba(255,255,255,0.1)" }}>
             <div style={{ fontSize: "28px", marginBottom: "8px" }}>🔒</div>
-            <div style={{ fontSize: "16px", fontWeight: 700, color: T.n900 }}>Redirecting to checkout...</div>
+            <div style={{ fontSize: "16px", fontWeight: 700, color: "#fff" }}>Redirecting to checkout...</div>
           </div>
         </div>
       )}
 
-      {/* ── 1) IMAGE ── */}
+      {/* ── HERO IMAGE with overlay ── */}
       <div style={{
         position: "relative",
         width: "100%",
-        height: "clamp(180px, 30vw, 240px)",
+        minHeight: 320,
+        maxHeight: 400,
+        aspectRatio: "16 / 9",
         overflow: "hidden",
         background: "linear-gradient(135deg, #1f2937, #374151)",
         flexShrink: 0,
@@ -161,59 +162,52 @@ function DealPageInner() {
             src={item.image_url}
             alt={item.title}
             onError={(e) => { e.currentTarget.style.display = "none"; }}
-            style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
           />
         )}
-      </div>
-
-      {/* ── Content ── */}
-      <div style={{ padding: "20px 20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-
-        {/* ── 2) TITLE + META ── */}
-        <div>
-          <div style={{
-            fontSize: "18px", fontWeight: 600, color: T.n900, lineHeight: 1.3,
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          }}>
+        {/* Bottom gradient overlay */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(0deg, rgba(10,10,10,0.9) 0%, rgba(10,10,10,0.4) 40%, transparent 70%)", pointerEvents: "none" }} />
+        {/* Overlay text */}
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "20px 20px 16px", zIndex: 2 }}>
+          <div style={{ fontSize: "24px", fontWeight: 700, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.02em" }}>
             {item.title}
           </div>
-          <div style={{
-            fontSize: "14px", color: T.n500, marginTop: "4px",
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          }}>
-            {metaLine}
+          <div style={{ fontSize: "14px", color: "rgba(255,255,255,0.7)", marginTop: "6px" }}>
+            {item.restaurant_name} · {dayName} · {timeWindow}
           </div>
         </div>
+      </div>
 
-        {/* ── 3) PRICE ── */}
+      {/* ── CONTENT ── */}
+      <div style={{ padding: "20px 20px 28px", display: "flex", flexDirection: "column", gap: "16px" }}>
+
+        {/* Price */}
         <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
-          <span style={{ fontFamily: T.mono, fontSize: "28px", fontWeight: 800, color: T.red, lineHeight: 1 }}>
+          <span style={{ fontFamily: T.mono, fontSize: "32px", fontWeight: 800, color: T.red, lineHeight: 1 }}>
             ${item.price.toFixed(2)}
           </span>
-          <span style={{ fontFamily: T.mono, fontSize: "16px", color: T.n400, textDecoration: "line-through" }}>
+          <span style={{ fontFamily: T.mono, fontSize: "16px", color: T.n500, textDecoration: "line-through" }}>
             ${item.original_price.toFixed(2)}
+          </span>
+          <span style={{ fontFamily: T.mono, fontSize: "11px", fontWeight: 800, color: T.green, background: "rgba(22,163,74,0.15)", padding: "3px 8px", borderRadius: "9999px" }}>
+            {pct}% OFF
           </span>
         </div>
 
-        {/* ── 4) SCARCITY BAR ── */}
+        {/* Scarcity */}
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-            <span style={{ fontSize: "13px", fontWeight: 600, color: sold ? T.red : T.n500 }}>
-              {sold ? "Sold Out" : `${remaining} / ${spotsTotal} spots left`}
+            <span style={{ fontSize: "13px", fontWeight: 600, color: sold ? T.red : "rgba(255,255,255,0.7)" }}>
+              {scarcityText}
             </span>
-            {!disabled && (
-              <span style={{ fontFamily: T.mono, fontSize: "11px", fontWeight: 700, color: T.red, background: "rgba(249,58,37,0.08)", padding: "3px 8px", borderRadius: "9999px" }}>
-                {pct}% OFF
-              </span>
-            )}
           </div>
-          <div style={{ width: "100%", height: 7, borderRadius: "9999px", background: T.n200, overflow: "hidden" }}>
+          <div style={{ width: "100%", height: 6, borderRadius: "9999px", background: "rgba(255,255,255,0.1)", overflow: "hidden" }}>
             <div style={{
               width: `${Math.min(fillPct, 100)}%`,
               height: "100%",
               borderRadius: "9999px",
               background: barColor,
-              transition: "width 300ms ease, background 300ms ease",
+              transition: "width 300ms ease",
             }} />
           </div>
         </div>
@@ -222,29 +216,30 @@ function DealPageInner() {
         {error && (
           <div style={{
             padding: "10px 14px", borderRadius: "10px", textAlign: "center",
-            background: "rgba(249,58,37,0.08)", color: T.red, fontSize: "13px",
+            background: "rgba(249,58,37,0.15)", border: "1px solid rgba(249,58,37,0.3)",
+            color: T.red, fontSize: "13px",
           }}>
             {error}
           </div>
         )}
 
-        {/* ── 5) CTA BUTTON ── */}
+        {/* CTA */}
         <button
           onClick={!disabled && !loading ? handleClaim : undefined}
           disabled={disabled || loading}
           style={{
             width: "100%",
-            minHeight: 52,
+            minHeight: 54,
             border: "none",
             borderRadius: "14px",
-            background: disabled ? T.n200 : T.red,
-            color: disabled ? T.n400 : T.n0,
+            background: disabled ? "rgba(255,255,255,0.08)" : T.red,
+            color: disabled ? "rgba(255,255,255,0.4)" : "#fff",
             fontFamily: T.display,
             fontWeight: 700,
             fontSize: "17px",
             cursor: disabled || loading ? "default" : "pointer",
             transition: "all 150ms ease",
-            boxShadow: disabled ? "none" : "0 4px 16px rgba(249,58,37,0.3)",
+            boxShadow: disabled ? "none" : "0 4px 20px rgba(249,58,37,0.4)",
             flexShrink: 0,
           }}
         >
