@@ -366,7 +366,7 @@ export default function App() {
             <CaptureForm dark />
           </div>
           {showHeroCard && (
-            <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={featuredDrop} spotsRemaining={featuredSpots} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} /></div></div>
+            <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "340px", width: "100%" }}><DropCard item={featuredDrop} spotsRemaining={featuredSpots} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} isAboveFold /></div></div>
           )}
         </div>
       </section>

@@ -76,9 +76,10 @@ function Btn({ children, full, disabled }: { children: React.ReactNode; full?: b
   return <button onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)} style={{ ...base, ...v }}>{children}</button>;
 }
 
-export function DropCard({ item, spotsRemaining, delay = 0, distance }: { item: DropItem; spotsRemaining: number; delay?: number; distance?: string | null }) {
+export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFold = false }: { item: DropItem; spotsRemaining: number; delay?: number; distance?: string | null; isAboveFold?: boolean }) {
   const [h, setH] = useState(false);
   const [ref, vis] = useInView();
+  const overlayRef = useRef<HTMLDivElement>(null);
   const remaining = spotsRemaining;
   const claimed = item.total_spots - remaining;
   const sold = remaining <= 0;
@@ -88,6 +89,15 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance }: { item: 
   const timeCtx = getTimeContext(item);
   const disabled = sold || ended || pickupActive;
 
+  const hasImage = !!item.image_url;
+
+  const handleImageLoad = () => {
+    const el = overlayRef.current;
+    if (el && document.contains(el)) {
+      el.style.opacity = "1";
+    }
+  };
+
   let statusText = "";
   let statusColor = T.color.amber500;
   if (ended) { statusText = "This drop has ended"; statusColor = T.color.n400; }
@@ -95,41 +105,55 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance }: { item: 
   else if (sold) { statusText = "All spots claimed"; statusColor = T.color.n400; }
   else { statusText = remaining <= 3 ? `🔥 Only ${remaining} left` : `🔥 ${claimed} claimed`; }
 
+  // Text clamp style for title
+  const textClamp: React.CSSProperties = { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden", lineClamp: 2 } as React.CSSProperties;
+
   return (
     <a href={`/drop/${item.id}`} style={{ textDecoration: "none", display: "block" }}>
     <div ref={ref} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
       style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: disabled ? T.shadow.sm : h ? T.shadow.dealHover : T.shadow.deal, transform: h && !disabled ? "translateY(-4px)" : "none", transition: `all ${T.tr.spring}`, opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", position: "relative", filter: disabled ? "grayscale(0.3)" : "none", cursor: "pointer" }}>
-      {/* Image */}
-      {item.image_url && (
-        <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", overflow: "hidden" }}>
+      {/* Image container — always present */}
+      <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", overflow: "hidden", background: "linear-gradient(135deg, #1f2937, #374151)" }}>
+        {/* Image element — only if URL exists */}
+        {hasImage && (
           <img
             src={item.image_url}
             alt={item.title}
-            loading="lazy"
+            loading={isAboveFold ? "eager" : "lazy"}
+            fetchPriority={isAboveFold ? "high" : "auto"}
+            onLoad={handleImageLoad}
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
             style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
           />
-          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 50%)" }} />
-          {sold && !ended && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}><span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 800, letterSpacing: "0.15em", color: T.color.n400, textTransform: "uppercase", background: "rgba(0,0,0,0.6)", padding: "8px 20px", borderRadius: T.radius.full }}>SOLD OUT</span></div>}
-          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "20px" }}>
-            <Badge>DROP</Badge>
-            <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: "#fff", marginTop: "12px" }}>{item.title}</div>
-            <div style={{ fontFamily: T.font.display, fontSize: "13px", color: "rgba(255,255,255,0.7)", marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
-            <div style={{ fontFamily: T.font.display, fontSize: "11px", color: "rgba(255,255,255,0.7)", marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
-            <div style={{ fontFamily: T.font.mono, fontSize: "11px", color: "rgba(255,255,255,0.7)", marginTop: "6px" }}>⏰ {formatTimeWindow(item)}</div>
+        )}
+        {/* Gradient overlay — always rendered, hidden until image loads */}
+        <div
+          ref={overlayRef}
+          style={{
+            position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none",
+            opacity: sold ? 1 : hasImage ? 0 : 1,
+            transition: sold ? "none" : "opacity 120ms ease-out",
+            background: "linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.45) 40%, rgba(0,0,0,0.2) 70%, rgba(0,0,0,0) 100%)",
+          }}
+        />
+        {/* Sold-out dim layer — z-2 */}
+        {sold && !ended && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 800, letterSpacing: "0.15em", color: T.color.n400, textTransform: "uppercase", background: "rgba(0,0,0,0.6)", padding: "8px 20px", borderRadius: T.radius.full }}>SOLD OUT</span>
           </div>
+        )}
+        {/* DROP badge — z-5 */}
+        <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}>
+          <Badge>DROP</Badge>
         </div>
-      )}
-      {/* Fallback: no image */}
-      {!item.image_url && (
-      <div style={{ background: `linear-gradient(135deg, ${T.color.n950}, ${T.color.n800})`, padding: "20px", position: "relative" }}>
-        {sold && !ended && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}><span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 800, letterSpacing: "0.15em", color: T.color.n400, textTransform: "uppercase", background: "rgba(0,0,0,0.6)", padding: "8px 20px", borderRadius: T.radius.full }}>SOLD OUT</span></div>}
-        <Badge>DROP</Badge>
-        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: "#fff", marginTop: "12px" }}>{item.title}</div>
-        <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
-        <div style={{ fontFamily: T.font.display, fontSize: "11px", color: T.color.n400, marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
-        <div style={{ fontFamily: T.font.mono, fontSize: "11px", color: T.color.n400, marginTop: "6px" }}>⏰ {formatTimeWindow(item)}</div>
+        {/* Text block — z-3 */}
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 3, padding: "12px 14px" }}>
+          <div style={{ ...textClamp, fontFamily: T.font.display, fontSize: "16px", fontWeight: 600, color: sold ? "rgba(255,255,255,0.7)" : "#FFFFFF", textShadow: "0 1px 2px rgba(0,0,0,0.6)", transition: "color 200ms ease", marginTop: "4px" }}>{item.title}</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "13px", color: sold ? "rgba(229,229,229,0.6)" : "rgba(229,229,229,0.85)", textShadow: "0 1px 2px rgba(0,0,0,0.4)", transition: "color 200ms ease", marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "11px", color: sold ? "rgba(229,229,229,0.6)" : "rgba(229,229,229,0.85)", textShadow: "0 1px 2px rgba(0,0,0,0.4)", transition: "color 200ms ease", marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
+          <div style={{ fontFamily: T.font.mono, fontSize: "11px", color: sold ? "rgba(229,229,229,0.6)" : "rgba(229,229,229,0.85)", textShadow: "0 1px 2px rgba(0,0,0,0.4)", transition: "color 200ms ease", marginTop: "6px" }}>⏰ {formatTimeWindow(item)}</div>
+        </div>
       </div>
-      )}
       <div style={{ padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
           <span style={{ fontFamily: T.font.mono, fontSize: "36px", fontWeight: 800, color: T.color.red500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
@@ -338,6 +362,7 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
               spotsRemaining={spots[item.id] ?? item.total_spots}
               delay={i * 120}
               distance={getDistance(item.lat, item.lng)}
+              isAboveFold={i < 2}
             />
           ))}
         </div>
