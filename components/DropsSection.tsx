@@ -89,19 +89,49 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
   const disabled = sold || ended || pickupActive;
 
   const hasImage = !!item.image_url;
-  const dimmed = disabled ? 0.5 : 1;
 
+  // ── Urgency tier ──
+  type Tier = "normal" | "medium" | "critical" | "last" | "sold_out";
+  let tier: Tier = "normal";
+  if (sold) tier = "sold_out";
+  else if (remaining === 1) tier = "last";
+  else if (remaining === 2) tier = "critical";
+  else if (remaining >= 3 && remaining <= 5) tier = "medium";
+
+  // ── Scarcity messaging (claimed-count tiers) ──
   let statusText = "";
-  let statusColor = T.color.amber500;
+  let statusColor = T.color.n500;
   if (ended) { statusText = "This drop has ended"; statusColor = T.color.n400; }
   else if (pickupActive) { statusText = "Ordering closed · Pickup in progress"; statusColor = T.color.n400; }
-  else if (sold) { statusText = "All spots claimed"; statusColor = T.color.n400; }
-  else { statusText = remaining <= 3 ? `🔥 Only ${remaining} left` : `🔥 ${claimed} claimed`; }
+  else if (tier === "sold_out") { statusText = `${claimed} claimed · Sold Out`; statusColor = T.color.n400; }
+  else if (tier === "last") { statusText = `🔥 ${claimed} claimed · Last spot!`; statusColor = T.color.red500; }
+  else if (tier === "critical") { statusText = `🔥 ${claimed} claimed · Only 2 left`; statusColor = T.color.red500; }
+  else if (tier === "medium") { statusText = `${claimed} claimed · Going fast · ${remaining} left`; statusColor = T.color.amber500; }
+  else { statusText = `${claimed} claimed · ${remaining} left`; statusColor = T.color.n500; }
+
+  // ── Pulse dot ──
+  const pulseColor = tier === "medium" ? "#FFB347" : (tier === "critical" || tier === "last") ? "#FF4D3A" : null;
+
+  // ── Progress bar ──
+  const fillPct = item.total_spots > 0 ? ((item.total_spots - remaining) / item.total_spots) * 100 : 100;
+  const barGradient = {
+    sold_out: "linear-gradient(90deg, #666, #888)",
+    critical: "linear-gradient(90deg, #F93A25, #FF6B5A)",
+    last: "linear-gradient(90deg, #F93A25, #FF6B5A)",
+    medium: "linear-gradient(90deg, #FF9500, #FFB347)",
+    normal: "linear-gradient(90deg, rgba(249,58,37,0.35), rgba(249,58,37,0.55))",
+  }[tier];
+
+  // ── Card styles (sold-out fully disabled) ──
+  const cardShadow = sold ? "0 4px 16px rgba(0,0,0,0.2)" : h ? T.shadow.dealHover : T.shadow.deal;
+  const cardTransform = h && !disabled ? "translateY(-4px)" : "none";
+  const cardOpacity = sold ? 0.75 : 1;
+  const cardCursor = sold ? "default" : "pointer";
 
   return (
-    <a href={`/drop/${item.id}`} style={{ textDecoration: "none", display: "block" }}>
-    <div ref={ref} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: disabled ? T.shadow.sm : h ? T.shadow.dealHover : T.shadow.deal, transform: h && !disabled ? "translateY(-4px)" : "none", transition: `all ${T.tr.spring}`, opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", cursor: "pointer" }}>
+    <a href={sold ? undefined : `/drop/${item.id}`} style={{ textDecoration: "none", display: "block", pointerEvents: sold ? "none" : undefined }}>
+    <div ref={ref} onMouseEnter={() => !sold && setH(true)} onMouseLeave={() => setH(false)}
+      style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: cardShadow, transform: cardTransform, transition: `all ${T.tr.spring}`, opacity: vis ? cardOpacity : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", cursor: cardCursor }}>
       {/* ── Image section ── */}
       <div style={{ position: "relative", width: "100%", height: 200, overflow: "hidden", background: "linear-gradient(135deg, #1f2937, #374151)" }}>
         {hasImage && (
@@ -122,7 +152,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
       {/* ── Content section ── */}
       <div style={{ padding: "14px 16px" }}>
         {/* Title + meta */}
-        <div style={{ opacity: dimmed }}>
+        <div style={{ opacity: sold ? 0.5 : 1 }}>
           <div style={{ fontFamily: T.font.display, fontSize: "18px", fontWeight: 600, color: T.color.n900, lineHeight: 1.3 }}>{item.title}</div>
           <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n500, marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
           <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
@@ -134,13 +164,24 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
           <span style={{ fontFamily: T.font.mono, fontSize: "16px", color: T.color.n400, textDecoration: "line-through" }}>${item.original_price.toFixed(2)}</span>
           <Badge type="savings">{pct}% OFF</Badge>
         </div>
+        {/* Progress bar */}
+        <div style={{ width: "100%", height: 6, borderRadius: "9999px", background: T.color.n200, overflow: "hidden", marginTop: "12px" }}>
+          <div style={{ width: `${Math.min(fillPct, 100)}%`, height: "100%", borderRadius: "9999px", background: barGradient, transition: "width 300ms ease" }} />
+        </div>
         {/* Engagement + time */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", marginBottom: "14px" }}>
-          <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: statusColor }}>{statusText}</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", marginBottom: "14px" }}>
+          <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: statusColor, display: "flex", alignItems: "center", gap: "6px" }}>
+            {pulseColor && <span style={{ width: 8, height: 8, borderRadius: "50%", background: pulseColor, display: "inline-block", animation: "pulseDot 1.5s ease-in-out infinite" }} />}
+            {statusText}
+          </span>
           {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.red500, background: T.color.red50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
         </div>
         {/* CTA */}
-        <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : sold ? "Sold Out" : "Ordering Closed") : `Claim Spot for $${item.price.toFixed(2)}`}</Btn>
+        {sold ? (
+          <button style={{ width: "100%", fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", borderRadius: T.radius.lg, padding: "14px 28px", background: "#555", color: "rgba(255,255,255,0.5)", cursor: "default", opacity: 0.7 }}>Sold Out</button>
+        ) : (
+          <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : "Ordering Closed") : `Claim Spot for $${item.price.toFixed(2)}`}</Btn>
+        )}
       </div>
     </div>
     </a>
@@ -188,6 +229,11 @@ export interface DropsData {
 interface DropsSectionProps {
   drops: DropItem[];
   onData?: (data: DropsData) => void;
+}
+
+// Pulse dot keyframe — injected once
+function PulseDotStyle() {
+  return <style>{`@keyframes pulseDot { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.8); } }`}</style>;
 }
 
 export default function DropsSection({ drops, onData }: DropsSectionProps) {
@@ -321,6 +367,7 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
   // Case D: 2+ active drops — featured in hero, remaining in vertical list here
   return (
     <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}>
+      <PulseDotStyle />
       <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
         <SectionHeader label="This Week's Drops" title="Active Drops Near You" />
         {!coords && !denied && (
