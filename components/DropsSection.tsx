@@ -76,7 +76,7 @@ function Btn({ children, full, disabled }: { children: React.ReactNode; full?: b
   return <button onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)} style={{ ...base, ...v }}>{children}</button>;
 }
 
-export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFold = false }: { item: DropItem; spotsRemaining: number; delay?: number; distance?: string | null; isAboveFold?: boolean }) {
+export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFold = false, featured = false }: { item: DropItem; spotsRemaining: number; delay?: number; distance?: string | null; isAboveFold?: boolean; featured?: boolean }) {
   const [h, setH] = useState(false);
   const [ref, vis] = useInView();
   const remaining = spotsRemaining;
@@ -133,7 +133,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
     <div ref={ref} onMouseEnter={() => !sold && setH(true)} onMouseLeave={() => setH(false)}
       style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: cardShadow, transform: cardTransform, transition: `all ${T.tr.spring}`, opacity: vis ? cardOpacity : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", cursor: cardCursor }}>
       {/* ── Image section ── */}
-      <div style={{ position: "relative", width: "100%", height: 200, overflow: "hidden", background: "linear-gradient(135deg, #1f2937, #374151)" }}>
+      <div style={{ position: "relative", width: "100%", height: featured ? 240 : 200, overflow: "hidden", background: "linear-gradient(135deg, #1f2937, #374151)" }}>
         {hasImage && (
           <img
             src={item.image_url}
