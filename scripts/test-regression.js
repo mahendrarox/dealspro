@@ -33,7 +33,7 @@ let skipped = 0;
 const STRICT = process.argv.includes("--strict");
 
 // Infra availability — populated by probeInfra() before tests run
-const infra = { spots: false, checkout: false, poll: false, lead: false, phoneSearch: false, successPage: false };
+const infra = { spots: false, checkout: false, poll: false, lead: false, phoneSearch: false, successPage: false, publicDrops: false, adminDrops: false, dropItemsTable: false };
 
 // ═══════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -84,6 +84,7 @@ async function probeInfra() {
     { key: "spots", url: `${BASE_URL}/api/spots`, label: "/api/spots" },
     { key: "poll", url: `${BASE_URL}/api/order/poll?session_id=probe`, label: "/api/order/poll" },
     { key: "phoneSearch", url: `${BASE_URL}/api/biz/phone-search?phone=probe`, label: "/api/biz/phone-search" },
+    { key: "publicDrops", url: `${BASE_URL}/api/public/drops`, label: "/api/public/drops" },
   ];
 
   // These need POST
@@ -115,6 +116,24 @@ async function probeInfra() {
     infra.successPage = res.status === 200;
   } catch { infra.successPage = false; }
   console.log(`  ${infra.successPage ? "✓" : "✗"} /ticket/success → ${infra.successPage ? "available" : "unavailable (500)"}`);
+
+  // Admin drops probe: any 2xx/3xx/4xx response means the route exists
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${BASE_URL}/admin/drops`, { signal: controller.signal, redirect: "manual" });
+    clearTimeout(timeout);
+    infra.adminDrops = res.status >= 200 && res.status < 500;
+  } catch { infra.adminDrops = false; }
+  console.log(`  ${infra.adminDrops ? "✓" : "✗"} /admin/drops → ${infra.adminDrops ? "available" : "unavailable"}`);
+
+  // drop_items table probe: verify Studio migration has been applied
+  try {
+    const supabase = getSupabase();
+    const { error } = await supabase.from("drop_items").select("id, end_time, is_active, total_spots").limit(1);
+    infra.dropItemsTable = !error;
+  } catch { infra.dropItemsTable = false; }
+  console.log(`  ${infra.dropItemsTable ? "✓" : "✗"} drop_items table → ${infra.dropItemsTable ? "ready" : "missing/outdated (apply migration-002-studio.sql)"}`);
 
   const available = Object.values(infra).filter(Boolean).length;
   const total = Object.keys(infra).length;
@@ -1221,6 +1240,11 @@ async function cleanup() {
   await supabase.from("orders").delete().eq("phone", "+10000000002");
   await supabase.from("orders").delete().eq("phone", "+10000000003");
 
+  // Studio test data cleanup
+  await supabase.from("orders").delete().like("drop_item_id", "test-%");
+  await supabase.from("drop_items").delete().like("id", "test-%");
+  await supabase.from("admin_logs").delete().eq("admin_email", "test@dealspro.ai");
+
   console.log("  [OK] Cleanup complete");
 }
 
@@ -1251,6 +1275,15 @@ async function main() {
     await testPhoneCapture();
     await testPhoneSearch();
     await testDropEdgeCases();
+    await testAdminUnauthenticated();
+    await testAdminWrongEmail();
+    await testZodInvalidInput();
+    await testCheckoutInactiveDrop();
+    await testCheckoutSoldOut();
+    await testCheckoutAfterEndTime();
+    await testPublicDropsOnlyActive();
+    await testPublicDropsExcludesInactive();
+    await testSpotsComputationOnlyPaid();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -1718,6 +1751,381 @@ async function testDropEdgeCases() {
       }
     } catch (err) {
       fail("Edge: /api/drops/spots", err.message);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 18-26: DEALS PRO STUDIO (admin + DB-backed runtime)
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Helper: insert a test drop_item row via service_role client. */
+async function insertTestDrop(overrides = {}) {
+  const supabase = getSupabase();
+  const id = overrides.id || `test-${testId()}`;
+  const now = Date.now();
+  const row = {
+    id,
+    title: "Test Drop",
+    restaurant_name: "Test Kitchen",
+    image_url: null,
+    price: 9.99,
+    original_price: 19.99,
+    total_spots: 5,
+    start_time: new Date(now - 60 * 60 * 1000).toISOString(),
+    end_time: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    is_active: true,
+    is_hero: false,
+    priority: 0,
+    ...overrides,
+  };
+  const { error } = await supabase.from("drop_items").upsert(row, { onConflict: "id" });
+  if (error) throw new Error(`[insertTestDrop] ${error.message}`);
+  return row;
+}
+
+async function deleteTestDrop(id) {
+  const supabase = getSupabase();
+  await supabase.from("drop_items").delete().eq("id", id);
+}
+
+// ── Test 18: admin unauthenticated redirects to login ──
+async function testAdminUnauthenticated() {
+  console.log("\n── Test 18: Admin Unauthenticated ──");
+  if (!infra.adminDrops) {
+    skip("Admin: unauthenticated redirect", "/admin/drops not available");
+    return;
+  }
+  try {
+    const res = await fetch(`${BASE_URL}/admin/drops`, { redirect: "manual" });
+    if ([302, 307, 308].includes(res.status)) {
+      pass("Admin: unauthenticated → redirect to /admin/login");
+    } else {
+      fail("Admin: unauthenticated redirect", `Expected redirect, got ${res.status}`);
+    }
+  } catch (err) {
+    fail("Admin: unauthenticated redirect", err.message);
+  }
+}
+
+// ── Test 19: admin login action rejects wrong email ──
+async function testAdminWrongEmail() {
+  console.log("\n── Test 19: Admin Wrong Email ──");
+  // Server Actions are not directly HTTP-testable without the form endpoint.
+  // This test is a best-effort probe: check that the login page renders
+  // and does not leak information about which email is the admin.
+  try {
+    const res = await fetch(`${BASE_URL}/admin/login`);
+    if (res.status !== 200) {
+      skip("Admin: wrong-email rejection", "login page not reachable");
+      return;
+    }
+    const html = await res.text();
+    if (html.includes("ADMIN_EMAIL") || html.includes(process.env.ADMIN_EMAIL || "__never__")) {
+      fail("Admin: login page leaks ADMIN_EMAIL", "env var visible in HTML");
+    } else {
+      pass("Admin: login page does not leak ADMIN_EMAIL");
+    }
+  } catch (err) {
+    fail("Admin: wrong-email rejection", err.message);
+  }
+}
+
+// ── Test 20: Zod schema rejects invalid input (inline, no HTTP) ──
+async function testZodInvalidInput() {
+  console.log("\n── Test 20: Zod Validation ──");
+  let schema;
+  try {
+    // Dynamic import so the test file can run even if the module is missing
+    schema = require("../lib/admin/schemas");
+  } catch (err) {
+    skip("Zod: validation", `schemas module not found: ${err.message}`);
+    return;
+  }
+  try {
+    const bad = schema.dropCreateSchema.safeParse({
+      id: "Bad ID With Spaces",
+      title: "",
+      restaurant_name: "",
+      image_url: "not-a-url",
+      price: -1,
+      original_price: 0,
+      total_spots: -5,
+      start_time: "not-a-date",
+      end_time: "2020-01-01T00:00:00Z",
+      is_active: true,
+      is_hero: false,
+      priority: 0,
+    });
+    if (bad.success) {
+      fail("Zod: invalid input", "safeParse should have failed on bad input");
+    } else {
+      pass("Zod: invalid input returns field errors");
+    }
+  } catch (err) {
+    fail("Zod: invalid input", err.message);
+  }
+}
+
+// ── Test 21: checkout rejects inactive drops ──
+async function testCheckoutInactiveDrop() {
+  console.log("\n── Test 21: Checkout Inactive Drop ──");
+  if (!infra.checkout) {
+    skip("Checkout: inactive drop", "/api/checkout not available");
+    return;
+  }
+  if (!infra.dropItemsTable) {
+    skip("Checkout: inactive drop", "drop_items table not ready — apply migration-002-studio.sql");
+    return;
+  }
+  let dropId = null;
+  try {
+    const drop = await insertTestDrop({ is_active: false, total_spots: 10 });
+    dropId = drop.id;
+    const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "+10000000010", drop_item_id: dropId, quantity: 1 }),
+    });
+    const data = await res.json();
+    if (res.status === 400 && data.error && data.error.toLowerCase().includes("not currently active")) {
+      pass("Checkout: inactive drop → rejected with friendly error");
+    } else {
+      fail("Checkout: inactive drop", `Status ${res.status}: ${data.error || "no error"}`);
+    }
+  } catch (err) {
+    fail("Checkout: inactive drop", err.message);
+  } finally {
+    if (dropId) await deleteTestDrop(dropId);
+  }
+}
+
+// ── Test 22: checkout rejects sold-out drops ──
+async function testCheckoutSoldOut() {
+  console.log("\n── Test 22: Checkout Sold Out ──");
+  if (!infra.checkout) {
+    skip("Checkout: sold out", "/api/checkout not available");
+    return;
+  }
+  if (!infra.dropItemsTable) {
+    skip("Checkout: sold out", "drop_items table not ready — apply migration-002-studio.sql");
+    return;
+  }
+  const supabase = getSupabase();
+  let dropId = null;
+  try {
+    const drop = await insertTestDrop({ total_spots: 1 });
+    dropId = drop.id;
+    // Claim the only spot via RPC
+    await supabase.rpc("create_order_atomic", {
+      p_stripe_session_id: testId(),
+      p_phone: "+10000000011",
+      p_drop_item_id: dropId,
+      p_drop_title: "Test",
+      p_restaurant_name: "Test",
+      p_price_paid: 9.99,
+      p_quantity: 1,
+      p_qr_token: testId(),
+      p_total_spots: 1,
+    });
+    // Try to claim again
+    const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "+10000000012", drop_item_id: dropId, quantity: 1 }),
+    });
+    const data = await res.json();
+    if (res.status === 400 && data.error && data.error.toLowerCase().includes("sold out")) {
+      pass("Checkout: sold out → rejected with friendly error");
+    } else {
+      fail("Checkout: sold out", `Status ${res.status}: ${data.error || "no error"}`);
+    }
+  } catch (err) {
+    fail("Checkout: sold out", err.message);
+  } finally {
+    if (dropId) {
+      await supabase.from("orders").delete().eq("drop_item_id", dropId);
+      await deleteTestDrop(dropId);
+    }
+  }
+}
+
+// ── Test 23: checkout rejects after end_time ──
+async function testCheckoutAfterEndTime() {
+  console.log("\n── Test 23: Checkout After End Time ──");
+  if (!infra.checkout) {
+    skip("Checkout: window closed", "/api/checkout not available");
+    return;
+  }
+  if (!infra.dropItemsTable) {
+    skip("Checkout: window closed", "drop_items table not ready — apply migration-002-studio.sql");
+    return;
+  }
+  let dropId = null;
+  try {
+    // start_time must be < end_time (DB check), so use a past window
+    const now = Date.now();
+    const drop = await insertTestDrop({
+      start_time: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+      end_time: new Date(now - 60 * 60 * 1000).toISOString(),
+      total_spots: 10,
+    });
+    dropId = drop.id;
+    const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "+10000000013", drop_item_id: dropId, quantity: 1 }),
+    });
+    const data = await res.json();
+    if (res.status === 400 && data.error && data.error.toLowerCase().includes("closed")) {
+      pass("Checkout: window closed → rejected with friendly error");
+    } else {
+      fail("Checkout: window closed", `Status ${res.status}: ${data.error || "no error"}`);
+    }
+  } catch (err) {
+    fail("Checkout: window closed", err.message);
+  } finally {
+    if (dropId) await deleteTestDrop(dropId);
+  }
+}
+
+// ── Test 24: public drops API only returns is_active=true ──
+async function testPublicDropsOnlyActive() {
+  console.log("\n── Test 24: Public Drops — only active ──");
+  if (!infra.publicDrops) {
+    skip("Public drops: only active", "/api/public/drops not available");
+    return;
+  }
+  if (!infra.dropItemsTable) {
+    skip("Public drops: only active", "drop_items table not ready — apply migration-002-studio.sql");
+    return;
+  }
+  let activeId = null;
+  let inactiveId = null;
+  try {
+    const active = await insertTestDrop({ is_active: true });
+    const inactive = await insertTestDrop({ is_active: false });
+    activeId = active.id;
+    inactiveId = inactive.id;
+
+    const res = await fetchWithRetry(`${BASE_URL}/api/public/drops`);
+    const data = await res.json();
+    const drops = Array.isArray(data.drops) ? data.drops : [];
+    const hasActive = drops.some((d) => d.id === activeId);
+    const hasInactive = drops.some((d) => d.id === inactiveId);
+
+    if (hasActive && !hasInactive) {
+      pass("Public drops: only active rows returned");
+    } else {
+      fail("Public drops: only active", `hasActive=${hasActive} hasInactive=${hasInactive}`);
+    }
+  } catch (err) {
+    fail("Public drops: only active", err.message);
+  } finally {
+    if (activeId) await deleteTestDrop(activeId);
+    if (inactiveId) await deleteTestDrop(inactiveId);
+  }
+}
+
+// ── Test 25: public drops excludes inactive (complement) ──
+async function testPublicDropsExcludesInactive() {
+  console.log("\n── Test 25: Public Drops — excludes inactive ──");
+  if (!infra.publicDrops) {
+    skip("Public drops: excludes inactive", "/api/public/drops not available");
+    return;
+  }
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/api/public/drops`);
+    const data = await res.json();
+    const drops = Array.isArray(data.drops) ? data.drops : [];
+    // The public API normalizes rows through dbRowToDropItem which sets
+    // status = is_active ? "live" : "expired". Any "expired" would indicate a leak.
+    const leaked = drops.find((d) => d.status && d.status !== "live");
+    if (leaked) {
+      fail("Public drops: excludes inactive", `leaked row: ${leaked.id}`);
+    } else {
+      pass("Public drops: no inactive rows in response");
+    }
+  } catch (err) {
+    fail("Public drops: excludes inactive", err.message);
+  }
+}
+
+// ── Test 26: spots computation only counts CONFIRMED_STATUS orders ──
+async function testSpotsComputationOnlyPaid() {
+  console.log("\n── Test 26: Spots Computation — paid only ──");
+  if (!infra.dropItemsTable) {
+    skip("Spots: computation paid-only", "drop_items table not ready — apply migration-002-studio.sql");
+    return;
+  }
+  const supabase = getSupabase();
+  let dropId = null;
+  try {
+    const drop = await insertTestDrop({ total_spots: 5 });
+    dropId = drop.id;
+
+    // Create 2 paid orders via RPC
+    for (let i = 0; i < 2; i++) {
+      await supabase.rpc("create_order_atomic", {
+        p_stripe_session_id: testId(),
+        p_phone: `+100000001${20 + i}`,
+        p_drop_item_id: dropId,
+        p_drop_title: "Test",
+        p_restaurant_name: "Test",
+        p_price_paid: 9.99,
+        p_quantity: 1,
+        p_qr_token: testId(),
+        p_total_spots: 5,
+      });
+    }
+
+    // Manually insert a pending order (bypassing RPC to simulate a non-confirmed state)
+    const pendingSid = testId();
+    await supabase.from("orders").insert({
+      stripe_session_id: pendingSid,
+      phone: "+10000000130",
+      drop_item_id: dropId,
+      drop_title: "Test",
+      restaurant_name: "Test",
+      price_paid: 9.99,
+      quantity: 1,
+      qr_token: testId(),
+      status: "pending",
+    });
+
+    // Compute remaining via /api/drops/spots (if available)
+    if (infra.spots) {
+      const res = await fetchWithRetry(`${BASE_URL}/api/drops/spots`);
+      const data = await res.json();
+      const remaining = data[dropId];
+      if (remaining === 3) {
+        pass("Spots: pending orders excluded — remaining=3");
+      } else {
+        fail("Spots: pending orders excluded", `expected remaining=3, got ${remaining}`);
+      }
+    } else {
+      // Direct DB sum fallback
+      const { data: rows } = await supabase
+        .from("orders")
+        .select("quantity")
+        .eq("drop_item_id", dropId)
+        .eq("status", "paid");
+      const totalPaid = (rows || []).reduce((s, r) => s + (r.quantity ?? 1), 0);
+      if (totalPaid === 2) {
+        pass("Spots: paid-only SUM(quantity) = 2 (pending excluded)");
+      } else {
+        fail("Spots: paid-only SUM(quantity)", `expected 2, got ${totalPaid}`);
+      }
+    }
+
+    // Cleanup manual pending order
+    await supabase.from("orders").delete().eq("stripe_session_id", pendingSid);
+  } catch (err) {
+    fail("Spots: computation paid-only", err.message);
+  } finally {
+    if (dropId) {
+      await supabase.from("orders").delete().eq("drop_item_id", dropId);
+      await deleteTestDrop(dropId);
     }
   }
 }

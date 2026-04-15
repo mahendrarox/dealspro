@@ -8,16 +8,22 @@
     "start": "next start",
     "lint": "eslint",
     "test:regression": "node scripts/run-regression.js",
-    "test:regression:only": "node scripts/test-regression.js"
+    "test:regression:only": "node scripts/test-regression.js",
+    "seed:drops": "tsx scripts/seed-drops.ts",
+    "verify:drops": "tsx scripts/verify-drops.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.99.2",
+    "jose": "^6.2.2",
     "next": "16.1.6",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "stripe": "^20.4.1",
-    "twilio": "^5.13.0"
+    "tsx": "^4.21.0",
+    "twilio": "^5.13.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

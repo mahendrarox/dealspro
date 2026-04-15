@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { DROP_ITEMS } from "@/lib/constants";
+import { DROP_ITEMS, type DropItem } from "@/lib/constants";
 import { formatPhone } from "@/components/PhoneInput";
 import { useUserLocation } from "@/lib/hooks/useUserLocation";
 import DropsSection, { DropCard, type DropsData } from "@/components/DropsSection";
@@ -323,7 +323,11 @@ const Icon = {
   close: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
 };
 
-export default function App() {
+type HomepageProps = { initialDrops?: DropItem[] };
+
+export default function App({ initialDrops }: HomepageProps = {}) {
+  // DB-backed drops from server component; fall back to in-memory constants when used standalone.
+  const drops = (initialDrops && initialDrops.length > 0) ? initialDrops : DROP_ITEMS;
   const [scrolled, setScrolled] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [dropsData, setDropsData] = useState<DropsData>({ featured: null, spotsMap: {}, loading: true });
@@ -331,7 +335,7 @@ export default function App() {
 
   // Featured drop for hero: show card only when an active featured drop exists (or while loading)
   const showHeroCard = dropsData.loading || dropsData.featured !== null;
-  const featuredDrop = dropsData.featured ?? DROP_ITEMS[0];
+  const featuredDrop = dropsData.featured ?? drops[0];
   const featuredSpots = dropsData.spotsMap[featuredDrop.id] ?? featuredDrop.total_spots;
 
   useEffect(() => { const fn = () => setScrolled(window.scrollY > 60); window.addEventListener("scroll", fn, { passive: true }); return () => window.removeEventListener("scroll", fn); }, []);
@@ -387,7 +391,7 @@ export default function App() {
       </section>
 
       {/* ACTIVE DROPS — DropsSection handles all edge cases */}
-      <DropsSection drops={DROP_ITEMS} onData={setDropsData} />
+      <DropsSection drops={drops} onData={setDropsData} />
 
       {/* HOW IT WORKS */}
       <section id="how-it-works" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="How It Works" title="Three Steps to Exclusive Deals" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "24px" }}>{[{ icon: Icon.phone, t: "Enter Your Name & Phone", d: "Sign up in 10 seconds. No app to download, no account to create." },{ icon: Icon.msg, t: "Get Weekly Deals", d: "Exclusive limited-time deals from local restaurants, delivered via text every week." },{ icon: Icon.qr, t: "Pay & Redeem", d: "Prepay online at the deal price. Show your QR code at the restaurant." }].map((s, i) => { const [r, v] = useInView(); return (<div key={i} ref={r} style={{ textAlign: "center", padding: "32px 24px", borderRadius: T.radius.xl, border: `1px solid ${T.color.n200}`, opacity: v ? 1 : 0, animation: v ? `fadeUp 0.5s ease ${i * 120}ms both` : "none" }}><div style={{ width: "60px", height: "60px", borderRadius: T.radius.xl, background: T.color.red50, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>{s.icon}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.red500, letterSpacing: "0.1em", marginBottom: "8px" }}>STEP {i + 1}</div><h3 style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "8px" }}>{s.t}</h3><p style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.6, color: T.color.n500 }}>{s.d}</p></div>); })}</div></div></section>
