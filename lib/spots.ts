@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { DROP_ITEMS, getDropItem } from "@/lib/constants";
+import { adminDb } from "@/lib/supabase-admin";
 
 /**
  * Canonical confirmed-payment status string used across the app.
@@ -19,18 +19,26 @@ export interface SpotsInfo {
  * Rule: spots_remaining = total_spots - SUM(quantity WHERE status = CONFIRMED_STATUS)
  * Only CONFIRMED_STATUS orders count. Pending/failed/cancelled/refunded are excluded.
  *
- * @param dropItemId - the drop id to look up
- * @param totalSpotsOverride - optional DB-provided total_spots. If omitted,
- *   falls back to the value in lib/constants.ts via getDropItem. Passing the
- *   DB value explicitly is the preferred path now that drop_items is the source of truth.
+ * The database is the ONLY source of truth. `totalSpotsOverride` lets
+ * callers that already loaded the drop from DB skip a redundant query;
+ * otherwise we fetch total_spots from `drop_items`.
  */
 export async function getSpotsInfo(
   dropItemId: string,
   totalSpotsOverride?: number,
 ): Promise<SpotsInfo> {
-  const totalSpots = typeof totalSpotsOverride === "number"
-    ? totalSpotsOverride
-    : getDropItem(dropItemId)?.total_spots ?? 0;
+  let totalSpots: number;
+  if (typeof totalSpotsOverride === "number") {
+    totalSpots = totalSpotsOverride;
+  } else {
+    const { data: row, error: rowErr } = await adminDb
+      .from("drop_items")
+      .select("total_spots")
+      .eq("id", dropItemId)
+      .maybeSingle();
+    if (rowErr || !row) return { remaining: 0, claimed: 0 };
+    totalSpots = row.total_spots;
+  }
 
   if (totalSpots === 0) return { remaining: 0, claimed: 0 };
 
@@ -57,14 +65,24 @@ export async function getSpotsInfo(
 
 /**
  * Get spots info for all drop items in one batch query.
- * Still uses DROP_ITEMS for the initial total_spots baseline so this path
- * stays compatible during the migration window. Will be switched to the
- * drop_items table in a follow-up PR.
+ *
+ * Reads drop_items from DB (no constants fallback), then sums paid
+ * order quantities per drop.
  */
 export async function getAllSpotsInfo(): Promise<Record<string, SpotsInfo>> {
   const result: Record<string, SpotsInfo> = {};
-  for (const item of DROP_ITEMS) {
-    result[item.id] = { remaining: item.total_spots, claimed: 0 };
+
+  const { data: drops, error: dropErr } = await adminDb
+    .from("drop_items")
+    .select("id, total_spots");
+
+  if (dropErr || !drops) {
+    console.error("[Spots] Error fetching drop_items:", dropErr?.message);
+    return result;
+  }
+
+  for (const d of drops as { id: string; total_spots: number }[]) {
+    result[d.id] = { remaining: d.total_spots, claimed: 0 };
   }
 
   const { data, error } = await supabase
@@ -83,10 +101,10 @@ export async function getAllSpotsInfo(): Promise<Record<string, SpotsInfo>> {
     claimed[row.drop_item_id] = (claimed[row.drop_item_id] ?? 0) + (row.quantity ?? 1);
   }
 
-  for (const item of DROP_ITEMS) {
-    const c = claimed[item.id] ?? 0;
-    result[item.id] = {
-      remaining: Math.max(0, item.total_spots - c),
+  for (const id of Object.keys(result)) {
+    const c = claimed[id] ?? 0;
+    result[id] = {
+      remaining: Math.max(0, result[id].remaining - c),
       claimed: c,
     };
   }

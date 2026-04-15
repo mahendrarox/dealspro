@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { supabase } from "@/lib/supabase";
-import { getDropItem, formatTimeWindow, formatDate, isRedemptionValid } from "@/lib/constants";
+import { getDropByIdForServer } from "@/lib/drops/db";
+import { formatTimeWindow, formatDate, isRedemptionValid } from "@/lib/drops/helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export default async function TicketPage({
     notFound();
   }
 
-  const item = order.drop_item_id ? getDropItem(order.drop_item_id) : null;
+  const item = order.drop_item_id ? await getDropByIdForServer(order.drop_item_id) : null;
   const ticketUrl = `${process.env.NEXT_PUBLIC_APP_URL}/ticket/${token}`;
   const qrDataUrl = await QRCode.toDataURL(ticketUrl, {
     width: 240,

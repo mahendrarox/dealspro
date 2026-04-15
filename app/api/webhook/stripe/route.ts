@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import Stripe from "stripe";
 import { supabase } from "@/lib/supabase";
-import { formatTimeWindow } from "@/lib/constants";
+import { formatTimeWindow } from "@/lib/drops/helpers";
 import { getDropByIdForServer } from "@/lib/drops/db";
 import { randomUUID } from "crypto";
 
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
       return new Response("ok", { status: 200 });
     }
 
-    // ── Server-side price truth — load canonical drop from DB (fallback to constants) ──
+    // ── Server-side price truth — load canonical drop from DB (NO fallback) ──
     const item = await getDropByIdForServer(dropItemId);
     log("webhook_drop_lookup", {
       drop_item_id: dropItemId,
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
 
     if (!item) {
       log("webhook_error", {
-        error: "Unknown drop_item_id — not found in DB or constants fallback",
+        error: "Unknown drop_item_id — not found in drop_items table",
         drop_item_id: dropItemId,
         stripe_session_id: stripeSessionId,
       });

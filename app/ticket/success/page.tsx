@@ -1,6 +1,7 @@
 import QRCode from "qrcode";
 import { supabase } from "@/lib/supabase";
-import { getDropItem, formatTimeWindow, formatDate, getSavings } from "@/lib/constants";
+import { getDropByIdForServer } from "@/lib/drops/db";
+import { formatTimeWindow, formatDate, getSavings } from "@/lib/drops/helpers";
 import SuccessClient from "@/components/SuccessClient";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export default async function SuccessPage({
         color: { dark: "#18181B", light: "#FFFFFF" },
       });
       if (data.drop_item_id) {
-        const item = getDropItem(data.drop_item_id);
+        const item = await getDropByIdForServer(data.drop_item_id);
         if (item) {
           const qty = data.quantity ?? 1;
           dropItemData = {

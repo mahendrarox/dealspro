@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { getDropItem, isRedemptionValid } from "@/lib/constants";
+import { getDropByIdForServer } from "@/lib/drops/db";
+import { isRedemptionValid } from "@/lib/drops/helpers";
 
 // ── Structured logging ──────────────────────────────────────────────
 function log(event: string, data: Record<string, unknown>) {
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const dropItem = orderCheck.drop_item_id ? getDropItem(orderCheck.drop_item_id) : null;
+  const dropItem = orderCheck.drop_item_id ? await getDropByIdForServer(orderCheck.drop_item_id) : null;
   if (dropItem && !isRedemptionValid(dropItem)) {
     log("expired", { qr_token: token, drop_item_id: orderCheck.drop_item_id });
     return NextResponse.json({ error: "This deal card has expired" }, { status: 400 });

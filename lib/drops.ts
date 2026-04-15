@@ -1,4 +1,4 @@
-import type { DropItem } from "@/lib/constants";
+import type { DropItem } from "@/lib/drops/types";
 
 /**
  * Returns the purchase cutoff time (ms since epoch) for a drop.

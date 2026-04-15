@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { DROP_ITEMS, type DropItem } from "@/lib/constants";
+import type { DropItem } from "@/lib/drops/types";
 import { formatPhone } from "@/components/PhoneInput";
 import { useUserLocation } from "@/lib/hooks/useUserLocation";
 import DropsSection, { DropCard, type DropsData } from "@/components/DropsSection";
@@ -326,17 +326,22 @@ const Icon = {
 type HomepageProps = { initialDrops?: DropItem[] };
 
 export default function App({ initialDrops }: HomepageProps = {}) {
-  // DB-backed drops from server component; fall back to in-memory constants when used standalone.
-  const drops = (initialDrops && initialDrops.length > 0) ? initialDrops : DROP_ITEMS;
+  // DB-backed drops from the server component. No constants fallback.
+  const drops: DropItem[] = initialDrops ?? [];
   const [scrolled, setScrolled] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [dropsData, setDropsData] = useState<DropsData>({ featured: null, spotsMap: {}, loading: true });
   const { getDistance } = useUserLocation();
 
-  // Featured drop for hero: show card only when an active featured drop exists (or while loading)
-  const showHeroCard = dropsData.loading || dropsData.featured !== null;
-  const featuredDrop = dropsData.featured ?? drops[0];
-  const featuredSpots = dropsData.spotsMap[featuredDrop.id] ?? featuredDrop.total_spots;
+  // Featured drop for hero: show card only when an active featured drop exists.
+  // If the DB has no active drops, the hero card is hidden entirely.
+  const featuredDrop: DropItem | null =
+    dropsData.featured ?? drops[0] ?? null;
+  const showHeroCard =
+    (dropsData.loading && drops.length > 0) || featuredDrop !== null;
+  const featuredSpots = featuredDrop
+    ? dropsData.spotsMap[featuredDrop.id] ?? featuredDrop.total_spots
+    : 0;
 
   useEffect(() => { const fn = () => setScrolled(window.scrollY > 60); window.addEventListener("scroll", fn, { passive: true }); return () => window.removeEventListener("scroll", fn); }, []);
 
@@ -370,7 +375,7 @@ export default function App({ initialDrops }: HomepageProps = {}) {
             <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Restaurant deals you can't find anywhere else. Dropped weekly. Claim before they sell out.</p>
             <CaptureForm dark />
           </div>
-          {showHeroCard && (
+          {showHeroCard && featuredDrop && (
             <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "440px", width: "100%", margin: "0 auto" }}><DropCard item={featuredDrop} spotsRemaining={featuredSpots} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} isAboveFold featured /></div></div>
           )}
         </div>

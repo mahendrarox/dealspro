@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { DROP_ITEMS } from "@/lib/constants";
 import { supabase } from "@/lib/supabase";
 import { adminDb } from "@/lib/supabase-admin";
 import { CONFIRMED_STATUS } from "@/lib/spots";
@@ -10,29 +9,24 @@ export const dynamic = "force-dynamic";
  * GET /api/drops/spots
  * Returns { [drop_id]: spots_remaining } for all drops.
  *
- * Drop totals come from `drop_items` (DB) first, with fallback to
- * constants.ts. Claimed counts sum `quantity` WHERE status = 'paid'.
- * Only CONFIRMED_STATUS orders reduce remaining spots.
+ * Drop totals come exclusively from `drop_items` — no constants fallback.
+ * Claimed counts sum `quantity` WHERE status = 'paid'. Only CONFIRMED_STATUS
+ * orders reduce remaining spots.
  */
 export async function GET() {
   const result: Record<string, number> = {};
 
-  // Baseline: DB totals, fallback to constants
-  try {
-    const { data: dbRows } = await adminDb
-      .from("drop_items")
-      .select("id, total_spots");
-    if (dbRows && dbRows.length > 0) {
-      for (const row of dbRows as { id: string; total_spots: number }[]) {
-        result[row.id] = row.total_spots;
-      }
-    }
-  } catch (err) {
-    console.error("[drops/spots] drop_items fetch failed, falling back:", err);
+  const { data: dropRows, error: dropErr } = await adminDb
+    .from("drop_items")
+    .select("id, total_spots");
+
+  if (dropErr || !dropRows) {
+    console.error("[drops/spots] drop_items fetch failed:", dropErr?.message);
+    return NextResponse.json(result);
   }
-  // Ensure every constants id is present (covers any DB gaps during migration)
-  for (const item of DROP_ITEMS) {
-    if (result[item.id] === undefined) result[item.id] = item.total_spots;
+
+  for (const row of dropRows as { id: string; total_spots: number }[]) {
+    result[row.id] = row.total_spots;
   }
 
   try {

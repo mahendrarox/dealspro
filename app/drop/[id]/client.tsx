@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { DropItem } from "@/lib/constants";
-import { formatTimeWindow, formatDate, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/constants";
+import type { DropItem } from "@/lib/drops/types";
+import { formatTimeWindow, formatDate, getDiscountPct, canPurchase, isPickupInProgress, hasEnded } from "@/lib/drops/helpers";
 
 const T = {
   red: "#F93A25",

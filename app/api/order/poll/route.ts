@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { supabase } from "@/lib/supabase";
-import { getDropItem } from "@/lib/constants";
+import { getDropByIdForServer } from "@/lib/drops/db";
 
 export async function GET(request: NextRequest) {
   const sessionId = request.nextUrl.searchParams.get("session_id")?.trim();
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 
   console.log("[poll] Order found:", { qr_token: order.qr_token, status: order.status });
 
-  const dropItem = order.drop_item_id ? getDropItem(order.drop_item_id) : null;
+  const dropItem = order.drop_item_id ? await getDropByIdForServer(order.drop_item_id) : null;
 
   const dealCardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/ticket/${order.qr_token}`;
   const qrDataUrl = await QRCode.toDataURL(dealCardUrl, {

@@ -1,37 +1,60 @@
 import "server-only";
 import { adminDb } from "@/lib/supabase-admin";
-import { DROP_ITEMS, getDropItem, type DropItem } from "@/lib/constants";
+import type { DropItem } from "./types";
 
 /**
  * Runtime shape of a drop as consumed by the public site.
- * Compatible with the existing DropItem type from lib/constants.ts so that
- * components receiving this object do not need to change.
  *
- * Key difference: DB rows store start_time/end_time as ISO timestamps, while
- * constants.ts splits them into date + start_time + end_time strings. This
- * helper normalizes both back into the DropItem shape.
+ * The database is the ONLY source of truth. There is NO fallback to
+ * `lib/constants.ts` anywhere in this module. Missing rows return null
+ * (for ID lookups) or an empty array (for list queries) — callers must
+ * handle those cases explicitly.
+ *
+ * Schema note: the live `drop_items` table currently has only a subset
+ * of the columns defined in `migration-002-studio.sql`. This helper
+ * queries the columns that exist and synthesizes safe defaults for the
+ * rest so every caller still sees a complete DropItem shape. Once the
+ * missing columns (start_time, end_time, is_active, is_hero, priority,
+ * image_url, updated_at) are added to the DB, `DB_SELECT_COLS` and
+ * `dbRowToDropItem` can be updated to read them directly.
  */
 export type RuntimeDropItem = DropItem;
+
+/** Columns that actually exist in the live drop_items table. */
+const DB_SELECT_COLS = "id, title, restaurant_name, price, original_price, total_spots, created_at";
 
 type DbDropRow = {
   id: string;
   title: string;
   restaurant_name: string;
-  image_url: string | null;
-  price: number | string; // numeric comes back as string via supabase-js
+  price: number | string;
   original_price: number | string | null;
   total_spots: number;
-  start_time: string; // ISO
-  end_time: string; // ISO
-  is_active: boolean;
-  is_hero: boolean;
-  priority: number;
+  created_at: string;
+  // Synthesized — not actually stored in DB today
+  image_url?: string | null;
+  start_time?: string;
+  end_time?: string;
+  is_active?: boolean;
+  is_hero?: boolean;
+  priority?: number;
 };
 
-/** Normalize a DB row to the legacy DropItem shape used by existing components. */
+/**
+ * Normalize a DB row into the legacy DropItem shape expected by existing
+ * UI components. Missing columns are synthesized with safe defaults so
+ * callers don't need to special-case a partial schema.
+ */
 function dbRowToDropItem(row: DbDropRow): RuntimeDropItem {
-  const start = new Date(row.start_time);
-  const end = new Date(row.end_time);
+  // Synthetic time window — drops are always purchaseable until the DB
+  // has explicit start_time/end_time columns.
+  const now = new Date();
+  const synthStart = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+  const synthEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  const start = row.start_time ? new Date(row.start_time) : synthStart;
+  const end = row.end_time ? new Date(row.end_time) : synthEnd;
+
   const pad = (n: number) => String(n).padStart(2, "0");
   const dateStr = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
   const startTimeStr = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
@@ -46,10 +69,10 @@ function dbRowToDropItem(row: DbDropRow): RuntimeDropItem {
     start_time: startTimeStr,
     end_time: endTimeStr,
     price: Number(row.price),
-    original_price: row.original_price === null ? 0 : Number(row.original_price),
+    original_price: row.original_price === null || row.original_price === undefined ? 0 : Number(row.original_price),
     total_spots: row.total_spots,
     image_url: row.image_url || "",
-    status: row.is_active ? "live" : "expired",
+    status: row.is_active === false ? "expired" : "live",
     stripe_price_id: "",
     redemption_valid_until: end.toISOString(),
     address: "",
@@ -59,88 +82,93 @@ function dbRowToDropItem(row: DbDropRow): RuntimeDropItem {
 }
 
 /**
- * Fetch all active drops from the database, ordered for display:
- * hero rows first, then lowest priority, then newest.
+ * Fetch all active drops from the database, ordered for display.
  *
- * On DB failure, falls back to the in-memory DROP_ITEMS array from
- * constants.ts. This preserves the existing behavior while the seed
- * pipeline is stabilized (migration plan step 3).
+ * No fallback. Returns an empty array on DB error or empty result.
+ * Callers must handle the empty case explicitly.
  */
 export async function getActiveDropsFromDb(): Promise<RuntimeDropItem[]> {
-  try {
-    const { data, error } = await adminDb
-      .from("drop_items")
-      .select(
-        "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority",
-      )
-      .eq("is_active", true)
-      .order("is_hero", { ascending: false })
-      .order("priority", { ascending: true })
-      .order("created_at", { ascending: false });
+  const { data, error } = await adminDb
+    .from("drop_items")
+    .select(DB_SELECT_COLS)
+    .order("created_at", { ascending: false });
 
-    if (error) throw error;
-    if (!data || data.length === 0) {
-      // Empty DB → safety fallback to seed source
-      return [...DROP_ITEMS];
-    }
-    return (data as DbDropRow[]).map(dbRowToDropItem);
-  } catch (err) {
-    console.error("[drops/db] getActiveDropsFromDb fallback:", err);
-    return [...DROP_ITEMS];
+  if (error) {
+    console.error("[drops/db] getActiveDropsFromDb error:", error.message);
+    return [];
   }
+  if (!data) return [];
+
+  // Until `is_active` column exists, treat every row as active.
+  return (data as DbDropRow[]).map(dbRowToDropItem);
 }
 
 /**
  * Fetch a single drop by id from the database.
  *
- * Safety fallback: if the DB row is missing or the query fails, we fall
- * back to `getDropItem(id)` from constants. This keeps the checkout and
- * webhook hot paths safe during the migration window.
+ * No fallback. Returns null when the DB row is missing. Callers MUST
+ * handle the null case and return a user-friendly error.
  */
 export async function getDropByIdForServer(id: string): Promise<RuntimeDropItem | null> {
-  try {
-    const { data, error } = await adminDb
-      .from("drop_items")
-      .select(
-        "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority",
-      )
-      .eq("id", id)
-      .maybeSingle();
-
-    if (error) throw error;
-    if (data) return dbRowToDropItem(data as DbDropRow);
-  } catch (err) {
-    console.error("[drops/db] getDropByIdForServer db error:", err);
-  }
-  // Fallback: constants.ts
-  return getDropItem(id) ?? null;
-}
-
-/** Strict DB-only lookup with no fallback. Reserved for a future cleanup PR. */
-export async function getDropByIdStrict(id: string): Promise<RuntimeDropItem | null> {
   const { data, error } = await adminDb
     .from("drop_items")
-    .select(
-      "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority",
-    )
+    .select(DB_SELECT_COLS)
     .eq("id", id)
     .maybeSingle();
-  if (error || !data) return null;
+
+  if (error) {
+    console.error(`[drops/db] getDropByIdForServer(${id}) error:`, error.message);
+    return null;
+  }
+  if (!data) return null;
   return dbRowToDropItem(data as DbDropRow);
 }
 
-/** Retrieve the raw DB row (unmangled) — used by admin list + checkout validation. */
-export async function getDropRow(id: string): Promise<DbDropRow | null> {
+/**
+ * Raw DB row (unmangled) — used by checkout validation.
+ *
+ * Synthesizes the admin-managed fields (is_active=true, end_time=30d out,
+ * is_hero=false, priority=0, image_url=null) until the DB has them.
+ */
+type AdminDropRow = {
+  id: string;
+  title: string;
+  restaurant_name: string;
+  image_url: string | null;
+  price: number | string;
+  original_price: number | string | null;
+  total_spots: number;
+  start_time: string;
+  end_time: string;
+  is_active: boolean;
+  is_hero: boolean;
+  priority: number;
+};
+
+export async function getDropRow(id: string): Promise<AdminDropRow | null> {
   const { data, error } = await adminDb
     .from("drop_items")
-    .select(
-      "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority",
-    )
+    .select(DB_SELECT_COLS)
     .eq("id", id)
     .maybeSingle();
   if (error || !data) return null;
-  return data as DbDropRow;
+
+  const now = Date.now();
+  return {
+    id: (data as DbDropRow).id,
+    title: (data as DbDropRow).title,
+    restaurant_name: (data as DbDropRow).restaurant_name,
+    image_url: (data as DbDropRow).image_url ?? null,
+    price: (data as DbDropRow).price,
+    original_price: (data as DbDropRow).original_price ?? null,
+    total_spots: (data as DbDropRow).total_spots,
+    start_time: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+    end_time: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    is_active: true,
+    is_hero: false,
+    priority: 0,
+  };
 }
 
 export { dbRowToDropItem };
-export type { DbDropRow };
+export type { DbDropRow, AdminDropRow, DropItem };

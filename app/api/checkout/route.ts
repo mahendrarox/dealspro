@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabase } from "@/lib/supabase";
-import { formatTimeWindow } from "@/lib/constants";
+import { formatTimeWindow } from "@/lib/drops/helpers";
 import { normalizePhone } from "@/lib/phone";
 import { getSpotsInfo, CONFIRMED_STATUS } from "@/lib/spots";
 import { getDropByIdForServer, getDropRow } from "@/lib/drops/db";
@@ -19,32 +19,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing drop id" }, { status: 400 });
     }
 
-    // Load drop from DB (falls back to constants if DB row missing — safety for migration)
+    // Load drop from DB — database is the ONLY source of truth. No fallback.
     const [item, dbRow] = await Promise.all([
       getDropByIdForServer(drop_item_id),
       getDropRow(drop_item_id),
     ]);
 
-    if (!item) {
+    if (!item || !dbRow) {
       return NextResponse.json(
         { error: "This deal is no longer available" },
         { status: 404 },
       );
     }
 
-    // If we have a DB row, use its is_active + end_time (authoritative).
-    // If only constants fallback, is_active is inferred from status === 'live'.
-    if (dbRow && dbRow.is_active === false) {
+    if (dbRow.is_active === false) {
       return NextResponse.json(
         { error: "This deal is not currently active" },
         { status: 400 },
       );
     }
 
-    // Check ordering window using end_time (DB row preferred, constants fallback via item)
-    const endMs = dbRow
-      ? new Date(dbRow.end_time).getTime()
-      : new Date(`${item.date}T${item.end_time}:00`).getTime();
+    // Authoritative ordering window from DB's ISO timestamps
+    const endMs = new Date(dbRow.end_time).getTime();
     if (Date.now() >= endMs) {
       return NextResponse.json(
         { error: "Ordering has closed for this deal" },
@@ -53,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Compute remaining using the authoritative total_spots
-    const totalSpots = dbRow ? dbRow.total_spots : item.total_spots;
+    const totalSpots = dbRow.total_spots;
     const { remaining } = await getSpotsInfo(drop_item_id, totalSpots);
 
     if (remaining <= 0) {
@@ -92,12 +88,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Server-side price: DB first, constants fallback.
-    const unitAmount = Math.round(
-      (dbRow ? Number(dbRow.price) : item.price) * 100,
-    );
-    const displayTitle = dbRow ? dbRow.title : item.title;
-    const displayRestaurant = dbRow ? dbRow.restaurant_name : item.restaurant_name;
+    // Server-side price: DB is authoritative.
+    const unitAmount = Math.round(Number(dbRow.price) * 100);
+    const displayTitle = dbRow.title;
+    const displayRestaurant = dbRow.restaurant_name;
 
     console.log("[Checkout] Creating session for", phone, drop_item_id, { quantity });
 

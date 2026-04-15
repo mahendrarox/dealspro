@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type { DropItem } from "@/lib/constants";
+import type { DropItem } from "@/lib/drops/types";
 import {
   formatTimeWindow,
   formatDate,
@@ -10,7 +10,7 @@ import {
   canPurchase,
   isPickupInProgress,
   hasEnded,
-} from "@/lib/constants";
+} from "@/lib/drops/helpers";
 import { useUserLocation } from "@/lib/hooks/useUserLocation";
 import {
   isActiveDrop,
