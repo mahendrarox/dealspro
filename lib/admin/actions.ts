@@ -1,5 +1,5 @@
 "use server";
-import "server-only";
+
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "./auth";
 import { dropCreateSchema, dropUpdateSchema } from "./schemas";

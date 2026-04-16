@@ -1,4 +1,3 @@
-import "server-only";
 import { adminDb } from "@/lib/supabase-admin";
 import type { DropItem } from "./types";
 

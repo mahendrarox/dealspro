@@ -1,4 +1,3 @@
-import "server-only";
 import { adminDb } from "@/lib/supabase-admin";
 
 export type AdminAction =

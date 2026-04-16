@@ -26,7 +26,7 @@ export async function requestAdminLink(email: string): Promise<LinkResult> {
   const { data, error } = await adminDb.auth.admin.generateLink({
     type: "magiclink",
     email,
-    options: { redirectTo: `${appUrl}/admin/auth/callback` },
+    options: { redirectTo: `${appUrl}/admin/login` },
   });
 
   if (error) {

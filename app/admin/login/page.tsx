@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { requestAdminLink } from "./actions";
 
 const T = {
@@ -12,7 +12,33 @@ const T = {
   display: "'DM Sans', sans-serif",
 };
 
+function useAuthHashExchange() {
+  const [exchanging, setExchanging] = useState(false);
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash || !hash.includes("access_token=")) return;
+    const params = new URLSearchParams(hash.substring(1));
+    const accessToken = params.get("access_token");
+    if (!accessToken) return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    setExchanging(true);
+    fetch("/admin/auth/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ access_token: accessToken }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok) window.location.href = "/admin/drops";
+        else window.location.href = "/admin/login?error=verify_failed";
+      })
+      .catch(() => setExchanging(false));
+  }, []);
+  return exchanging;
+}
+
 export default function LoginPage() {
+  const exchanging = useAuthHashExchange();
   const [email, setEmail] = useState("");
   const [link, setLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
