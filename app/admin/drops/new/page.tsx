@@ -1,5 +1,6 @@
 import { requireAdmin } from "@/lib/admin/auth";
-import DropForm, { emptyDropForm } from "../drop-form";
+import DropForm from "../drop-form";
+import { emptyDropForm } from "../form-utils";
 
 export const dynamic = "force-dynamic";
 

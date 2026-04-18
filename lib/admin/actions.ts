@@ -141,7 +141,8 @@ export async function toggleActive(id: string): Promise<ActionResult> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// TOGGLE is_hero
+// TOGGLE is_hero — single-hero invariant enforced by set_hero_drop RPC
+// (atomic at DB level) + idx_single_hero partial unique index (defense in depth)
 // ═══════════════════════════════════════════════════════════════════════
 export async function toggleHero(id: string): Promise<ActionResult> {
   let admin: { email: string };
@@ -162,12 +163,26 @@ export async function toggleHero(id: string): Promise<ActionResult> {
   }
 
   const newValue = !current.is_hero;
-  const { error } = await adminDb
-    .from("drop_items")
-    .update({ is_hero: newValue })
-    .eq("id", id);
 
-  if (error) return { ok: false, error: "Could not toggle" };
+  if (newValue) {
+    // Setting to true: use atomic RPC that unflags any existing hero
+    // and flags the target row in a single transaction.
+    const { error: rpcErr } = await adminDb.rpc("set_hero_drop", { target_id: id });
+    if (rpcErr) {
+      console.error("[toggleHero] set_hero_drop RPC failed:", rpcErr.message);
+      return { ok: false, error: "Could not set hero" };
+    }
+  } else {
+    // Setting to false: simple targeted update; no RPC needed.
+    const { error } = await adminDb
+      .from("drop_items")
+      .update({ is_hero: false })
+      .eq("id", id);
+    if (error) {
+      console.error("[toggleHero] unset failed:", error.message);
+      return { ok: false, error: "Could not unset hero" };
+    }
+  }
 
   await logAdminAction(admin.email, "toggle_hero", id, {
     is_hero: { before: current.is_hero, after: newValue },
