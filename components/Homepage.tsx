@@ -324,11 +324,11 @@ function CaptureForm({ dark }) {
           onClick={() => { setOptIn(!optIn); setConsentTouched(true); }}>
           <div style={{
             width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0,
-            border: `2px solid ${optIn ? T.color.red500 : showConsentError ? AMBER : T.color.n300}`,
-            background: optIn ? T.color.red500 : T.color.n0,
+            border: `2px solid ${optIn ? VALID_GREEN : showConsentError ? AMBER : T.color.n300}`,
+            background: optIn ? VALID_GREEN : T.color.n0,
             display: "flex", alignItems: "center", justifyContent: "center",
             transition: `all ${T.tr.fast}`,
-            boxShadow: optIn ? "0 2px 8px rgba(249,58,37,0.3)" : "none",
+            boxShadow: optIn ? "0 2px 8px rgba(34,197,94,0.3)" : "none",
           }}>
             {optIn && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
           </div>
