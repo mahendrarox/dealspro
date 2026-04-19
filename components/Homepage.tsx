@@ -37,6 +37,10 @@ const css = `
   @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
   @keyframes checkPop { 0%{transform:scale(0);opacity:0} 60%{transform:scale(1.2);opacity:1} 100%{transform:scale(1);opacity:1} }
   @keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
+  @keyframes consentNudge { 0%,100%{box-shadow:0 0 0 3px rgba(249,58,37,0.08)} 50%{box-shadow:0 0 0 6px rgba(249,58,37,0.18)} }
+  @media (prefers-reduced-motion: reduce) {
+    .consent-nudge { animation: none !important; }
+  }
 `;
 
 function useInView() {
@@ -289,13 +293,32 @@ function CaptureForm({ dark }) {
       </div>
 
       {/* Opt-in checkbox */}
-      <div style={{
-        background: T.color.green50,
-        border: `1.5px solid ${showConsentError ? AMBER : "rgba(22,163,74,0.12)"}`,
+      {(() => {
+        // Attention nudge: name+phone valid, consent unchecked, and the
+        // amber error isn't already showing (error wins as it's the stronger signal).
+        const nudgeConsent = nameValid && phoneValid && !optIn && !showConsentError;
+        return (
+      <div
+        className={nudgeConsent ? "consent-nudge" : undefined}
+        style={{
+        background: nudgeConsent
+          ? "rgba(249, 58, 37, 0.06)"
+          : T.color.green50,
+        border: `1.5px solid ${
+          showConsentError
+            ? AMBER
+            : nudgeConsent
+              ? "rgba(249, 58, 37, 0.22)"
+              : "rgba(22,163,74,0.12)"
+        }`,
         borderRadius: T.radius.lg,
         padding: "16px",
         marginBottom: "20px",
-        transition: "border-color 150ms ease",
+        transition: "border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease",
+        boxShadow: nudgeConsent ? "0 0 0 3px rgba(249, 58, 37, 0.08)" : "none",
+        // Subtle pulse, exactly 2 cycles, then settles.
+        // Disabled via @media (prefers-reduced-motion: reduce) on .consent-nudge.
+        animation: nudgeConsent ? "consentNudge 1.6s ease-in-out 2" : "none",
       }}>
         <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", minHeight: "24px" }}
           onClick={() => { setOptIn(!optIn); setConsentTouched(true); }}>
@@ -317,6 +340,8 @@ function CaptureForm({ dark }) {
           <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "8px", paddingLeft: "36px", fontWeight: 500 }}>Please agree to receive deal alerts</div>
         )}
       </div>
+        );
+      })()}
 
       {/* Eligibility message */}
       {allValid && (
