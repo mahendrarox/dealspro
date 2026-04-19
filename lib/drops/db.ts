@@ -67,6 +67,8 @@ function dbRowToDropItem(row: DbDropRow): DropItem {
     address: "",
     lat: 0,
     lng: 0,
+    is_hero: row.is_hero,
+    priority: row.priority,
   };
 }
 

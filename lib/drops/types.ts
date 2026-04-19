@@ -26,4 +26,8 @@ export interface DropItem {
   address: string;
   lat: number;
   lng: number;
+  /** Admin-managed hero flag (drop_items.is_hero). Optional for legacy callers. */
+  is_hero?: boolean;
+  /** Admin-managed display priority (drop_items.priority). Lower comes first. */
+  priority?: number;
 }

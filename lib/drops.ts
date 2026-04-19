@@ -57,7 +57,18 @@ export function isSoldOutDrop(
 
 /**
  * Deterministic featured drop selection.
- * Priority: earliest cutoff → lowest spots → ID tiebreaker
+ *
+ * Priority order:
+ *   1. Admin-set hero (is_hero = true) wins over everything else
+ *   2. Lower admin priority value wins
+ *   3. Earliest purchase cutoff
+ *   4. Lowest remaining spots
+ *   5. Alphabetical id (tiebreaker for full determinism)
+ *
+ * The DB query (`getActiveDropsFromDb`) already orders by hero+priority,
+ * so SSR shows the hero first. This function ensures the client-side
+ * selection that runs after the spots fetch doesn't override the hero
+ * with a different drop, which would cause a hero-flicker on hydration.
  */
 export function selectFeatured(
   activeDrops: DropItem[],
@@ -66,14 +77,27 @@ export function selectFeatured(
   if (activeDrops.length === 0) return null;
 
   const sorted = [...activeDrops].sort((a, b) => {
+    // 1. Hero flag wins (true sorts before false)
+    const heroA = a.is_hero === true ? 1 : 0;
+    const heroB = b.is_hero === true ? 1 : 0;
+    if (heroA !== heroB) return heroB - heroA;
+
+    // 2. Lower priority value wins (default 0 if absent)
+    const prA = a.priority ?? 0;
+    const prB = b.priority ?? 0;
+    if (prA !== prB) return prA - prB;
+
+    // 3. Earliest cutoff
     const cutoffA = getPurchaseCutoff(a);
     const cutoffB = getPurchaseCutoff(b);
     if (cutoffA !== cutoffB) return cutoffA - cutoffB;
 
+    // 4. Lowest remaining spots
     const spotsA = spotsMap[a.id] ?? a.total_spots;
     const spotsB = spotsMap[b.id] ?? b.total_spots;
     if (spotsA !== spotsB) return spotsA - spotsB;
 
+    // 5. Alphabetical id (deterministic tiebreaker)
     return String(a.id).localeCompare(String(b.id));
   });
 
