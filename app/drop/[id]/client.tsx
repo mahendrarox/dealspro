@@ -22,6 +22,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
   const [spotsRemaining, setSpotsRemaining] = useState<number | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [phone, setPhone] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState(1);
 
   // Fetch live spots every 15s
   useEffect(() => {
@@ -65,6 +66,15 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
   else if (remaining <= 5) scarcityText = `${claimed} claimed · Going fast · ${remaining} left`;
   else scarcityText = `${claimed} claimed · ${remaining} left`;
 
+  // ── Quantity bounds: cap at min(4, spots_remaining); 1 minimum ──
+  const maxQty = Math.max(1, Math.min(4, remaining));
+
+  // Auto-clamp quantity downward if live spots drop below current selection.
+  // Never let quantity exceed available remaining (prevents mid-session oversell).
+  useEffect(() => {
+    if (quantity > maxQty) setQuantity(maxQty);
+  }, [maxQty, quantity]);
+
   const dayName = formatDate(item).split(",")[0];
   const timeWindow = formatTimeWindow(item);
 
@@ -76,7 +86,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone || undefined, drop_item_id: item.id, quantity: 1 }),
+        body: JSON.stringify({ phone: phone || undefined, drop_item_id: item.id, quantity }),
       });
       const data = await res.json();
       if (data.checkoutUrl) {
@@ -92,11 +102,14 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
     }
   };
 
+  const total = (item.price * quantity).toFixed(2);
   const ctaText = loading
     ? "Redirecting..."
     : disabled
       ? (sold ? "Sold Out" : ended ? "Ended" : pickupActive ? "Closed" : cancelled ? "Cancelled" : "Unavailable")
-      : `Claim for $${item.price.toFixed(2)}`;
+      : quantity === 1
+        ? `Claim for $${total}`
+        : `Claim ${quantity} Spots for $${total}`;
 
   return (
     <div style={{
@@ -188,6 +201,63 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
             color: T.red, fontSize: "13px",
           }}>
             {error}
+          </div>
+        )}
+
+        {/* ── Quantity selector — hidden when sold-out ── */}
+        {!sold && !disabled && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 16px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 12,
+            }}
+          >
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>Quantity</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <button
+                type="button"
+                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                disabled={quantity <= 1}
+                aria-label="Decrease quantity"
+                style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  border: "1.5px solid rgba(255,255,255,0.15)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: quantity <= 1 ? "rgba(255,255,255,0.25)" : "#fff",
+                  fontSize: 20, fontWeight: 700,
+                  cursor: quantity <= 1 ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 150ms ease",
+                  fontFamily: T.display,
+                }}
+              >−</button>
+              <span style={{
+                fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: "#fff",
+                minWidth: 24, textAlign: "center",
+              }}>{quantity}</span>
+              <button
+                type="button"
+                onClick={() => setQuantity((q) => Math.min(maxQty, q + 1))}
+                disabled={quantity >= maxQty}
+                aria-label="Increase quantity"
+                style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  border: "1.5px solid rgba(255,255,255,0.15)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: quantity >= maxQty ? "rgba(255,255,255,0.25)" : "#fff",
+                  fontSize: 20, fontWeight: 700,
+                  cursor: quantity >= maxQty ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 150ms ease",
+                  fontFamily: T.display,
+                }}
+              >+</button>
+            </div>
           </div>
         )}
 
