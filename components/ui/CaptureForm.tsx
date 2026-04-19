@@ -14,7 +14,7 @@ function formatPhone(val: string): string {
 
 export default function CaptureForm({ dark = false }: { dark?: boolean }) {
   const nameRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { nameRef.current?.focus(); }, []);
+  // NOTE: do NOT auto-focus on mount — see Homepage.tsx CaptureForm for rationale.
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [optIn, setOptIn] = useState(false);

@@ -96,7 +96,10 @@ function Btn({ children, variant = "primary", full, disabled, onClick, style = {
 // ── Capture Form: Real-time validation ────────────────
 function CaptureForm({ dark }) {
   const nameRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { nameRef.current?.focus(); }, []);
+  // NOTE: do NOT auto-focus on mount. The form lives below the hero on
+  // desktop; calling .focus() on an off-screen input causes the browser
+  // to scroll the input into view, skipping the hero. Users click the
+  // field naturally.
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [optIn, setOptIn] = useState(false);
