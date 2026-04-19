@@ -106,13 +106,29 @@ function CaptureForm({ dark }) {
   const [submitError, setSubmitError] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [phoneTouched, setPhoneTouched] = useState(false);
+  const [consentTouched, setConsentTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const digits = phone.replace(/\D/g, "");
   const nameValid = name.trim().length > 0;
   const phoneValid = digits.length === 10;
   const allValid = nameValid && phoneValid && optIn;
   const digitsLeft = 10 - digits.length;
 
+  // Show validation only after the user has touched the field (blur)
+  // OR after they attempt to submit. Initial render = clean, no errors.
+  const showNameError = (nameTouched || submitAttempted) && !nameValid;
+  const showNameOk = (nameTouched || submitAttempted) && nameValid;
+  const showPhoneError = (phoneTouched || submitAttempted) && !phoneValid;
+  const showPhoneOk = (phoneTouched || submitAttempted) && phoneValid;
+  const showConsentError = (consentTouched || submitAttempted) && !optIn;
+
   const submit = async () => {
+    // Mark every field touched so any missing values surface their amber state
+    setSubmitAttempted(true);
+    setNameTouched(true);
+    setPhoneTouched(true);
+    setConsentTouched(true);
+
     if (!allValid || loading) return;
     setLoading(true);
     setSubmitError("");
@@ -162,10 +178,25 @@ function CaptureForm({ dark }) {
     </div>
   );
 
-  const nameErr = nameTouched && !nameValid;
-  const phoneErr = phoneTouched && digits.length > 0 && !phoneValid;
-  const nameBorder = nameErr ? "#DC2626" : nameValid && nameTouched ? T.color.green500 : focus === "name" ? T.color.red500 : T.color.n300;
-  const phoneBorder = phoneErr ? "#DC2626" : phoneValid ? T.color.green500 : focus === "phone" ? T.color.red500 : T.color.n300;
+  // ── Border colors ────────────────────────────────────────────────
+  // Priority: focus (brand red @ 0.4) > error (amber) > valid (green) > neutral grey.
+  const AMBER = "#F59E0B";
+  const VALID_GREEN = "#22C55E";
+  const NEUTRAL = "#D1D5DB";
+  const FOCUS_RED = "rgba(249, 58, 37, 0.4)";
+  const FOCUS_GLOW = "0 0 0 3px rgba(249, 58, 37, 0.1)";
+
+  const nameBorder =
+    focus === "name" ? FOCUS_RED :
+    showNameError ? AMBER :
+    showNameOk ? VALID_GREEN :
+    NEUTRAL;
+
+  const phoneBorder =
+    focus === "phone" ? FOCUS_RED :
+    showPhoneError ? AMBER :
+    showPhoneOk ? VALID_GREEN :
+    NEUTRAL;
 
   const cardBg = "#FFFFFF";
   const cardBorder = T.color.n200;
@@ -191,26 +222,31 @@ function CaptureForm({ dark }) {
       <div style={{ marginBottom: "16px" }}>
         <label style={{ display: "flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
           Your Name
-          {nameValid && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
         </label>
         <div style={{ position: "relative" }}>
           <input ref={nameRef} type="text" placeholder="e.g. Sarah" value={name}
-            onChange={e => { setName(e.target.value); if (!nameTouched) setNameTouched(true); }}
-            onFocus={() => setFocus("name")} onBlur={() => { setFocus(null); setNameTouched(true); }}
-            style={{ width: "100%", padding: "16px 44px 16px 16px", border: `2px solid ${nameBorder}`, borderRadius: T.radius.lg, fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: T.color.n900, background: inputBg, outline: "none", boxShadow: focus === "name" ? T.shadow.focus : "none", transition: `all ${T.tr.base}` }}
+            onChange={e => setName(e.target.value)}
+            onFocus={() => setFocus("name")}
+            onBlur={() => { setFocus(null); setNameTouched(true); }}
+            style={{
+              width: "100%",
+              padding: "16px 44px 16px 16px",
+              border: `2px solid ${nameBorder}`,
+              borderRadius: T.radius.lg,
+              fontFamily: T.font.display, fontSize: "16px", fontWeight: 500,
+              color: T.color.n900, background: inputBg, outline: "none",
+              boxShadow: focus === "name" ? FOCUS_GLOW : "none",
+              transition: "border-color 150ms ease, box-shadow 150ms ease",
+            }}
           />
-          {nameTouched && (
+          {showNameOk && (
             <div style={{ position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)" }}>
-              {nameValid ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              )}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={VALID_GREEN} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
           )}
         </div>
-        {!nameValid && focus === "name" && (
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "6px", paddingLeft: "2px" }}>Enter your name</div>
+        {showNameError && (
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "6px", paddingLeft: "2px" }}>Please enter your name</div>
         )}
       </div>
 
@@ -218,48 +254,51 @@ function CaptureForm({ dark }) {
       <div style={{ marginBottom: "20px" }}>
         <label style={{ display: "flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
           Phone Number
-          {phoneValid && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
         </label>
-        <div style={{ display: "flex", borderRadius: T.radius.lg, overflow: "hidden", border: `2px solid ${phoneBorder}`, boxShadow: focus === "phone" ? T.shadow.focus : "none", transition: `all ${T.tr.base}`, background: inputBg }}>
+        <div style={{
+          display: "flex",
+          borderRadius: T.radius.lg, overflow: "hidden",
+          border: `2px solid ${phoneBorder}`,
+          boxShadow: focus === "phone" ? FOCUS_GLOW : "none",
+          transition: "border-color 150ms ease, box-shadow 150ms ease",
+          background: inputBg,
+        }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 14px", background: T.color.n200, borderRight: `1px solid ${T.color.n300}`, flexShrink: 0 }}>
             <img src="https://flagcdn.com/w40/us.png" alt="US" style={{ width: "20px", height: "14px", objectFit: "cover", borderRadius: "2px" }} />
             <span style={{ fontFamily: T.font.mono, fontSize: "14px", fontWeight: 700, color: T.color.n500 }}>+1</span>
           </div>
           <input type="tel" autoComplete="tel" inputMode="tel" placeholder="(555) 123-4567" value={phone}
-            onChange={e => { setPhone(formatPhone(e.target.value)); if (!phoneTouched) setPhoneTouched(true); }}
-            onFocus={() => setFocus("phone")} onBlur={() => { setFocus(null); setPhoneTouched(true); }}
-            onKeyDown={e => { if (e.key === "Enter" && allValid) submit(); }}
+            onChange={e => setPhone(formatPhone(e.target.value))}
+            onFocus={() => setFocus("phone")}
+            onBlur={() => { setFocus(null); setPhoneTouched(true); }}
+            onKeyDown={e => { if (e.key === "Enter") submit(); }}
             style={{ flex: 1, padding: "16px 14px", border: "none", outline: "none", fontFamily: T.font.display, fontSize: "16px", fontWeight: 500, color: T.color.n900, background: "transparent", minWidth: 0 }}
           />
-          {phoneTouched && digits.length > 0 && (
+          {showPhoneOk && (
             <div style={{ display: "flex", alignItems: "center", paddingRight: "14px" }}>
-              {phoneValid ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-              ) : (
-                <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.amber500 }}>{digitsLeft} left</span>
-              )}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={VALID_GREEN} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
           )}
         </div>
-        {!phoneValid && nameValid && (focus === "phone" || (!phoneTouched && !digits.length)) && (
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "6px", paddingLeft: "2px" }}>Enter your phone number</div>
+        {showPhoneError && (
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "6px", paddingLeft: "2px" }}>Enter a valid US phone number</div>
         )}
       </div>
 
       {/* Opt-in checkbox */}
       <div style={{
-        background: nameValid && phoneValid && !optIn ? "rgba(22,163,74,0.06)" : T.color.green50,
-        border: `1.5px solid ${nameValid && phoneValid && !optIn ? "rgba(22,163,74,0.25)" : "rgba(22,163,74,0.12)"}`,
+        background: T.color.green50,
+        border: `1.5px solid ${showConsentError ? AMBER : "rgba(22,163,74,0.12)"}`,
         borderRadius: T.radius.lg,
         padding: "16px",
         marginBottom: "20px",
-        transition: `all ${T.tr.base}`,
+        transition: "border-color 150ms ease",
       }}>
         <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", minHeight: "24px" }}
-          onClick={() => setOptIn(!optIn)}>
+          onClick={() => { setOptIn(!optIn); setConsentTouched(true); }}>
           <div style={{
             width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0,
-            border: `2px solid ${optIn ? T.color.red500 : nameValid && phoneValid ? T.color.green500 : T.color.n300}`,
+            border: `2px solid ${optIn ? T.color.red500 : showConsentError ? AMBER : T.color.n300}`,
             background: optIn ? T.color.red500 : T.color.n0,
             display: "flex", alignItems: "center", justifyContent: "center",
             transition: `all ${T.tr.fast}`,
@@ -271,8 +310,8 @@ function CaptureForm({ dark }) {
             I agree to receive deal alerts via SMS. No spam. Reply STOP anytime.
           </span>
         </label>
-        {nameValid && phoneValid && !optIn && (
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.green500, marginTop: "8px", paddingLeft: "36px", fontWeight: 500 }}>Check the box to continue</div>
+        {showConsentError && (
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "8px", paddingLeft: "36px", fontWeight: 500 }}>Please agree to receive deal alerts</div>
         )}
       </div>
 
@@ -284,8 +323,8 @@ function CaptureForm({ dark }) {
         </div>
       )}
 
-      {/* Submit */}
-      <button onClick={allValid && !loading ? submit : undefined} style={{
+      {/* Submit — always clickable so submit() runs validation feedback */}
+      <button onClick={loading ? undefined : submit} style={{
         width: "100%", padding: "18px 28px",
         border: "none",
         borderRadius: T.radius.lg, fontFamily: T.font.display,
@@ -294,7 +333,7 @@ function CaptureForm({ dark }) {
         background: allValid && !loading ? "linear-gradient(135deg, #F93A25 0%, #E0311F 100%)" : "#E5E7EB",
         color: allValid && !loading ? "#FFFFFF" : `rgb(${Math.max(75 - name.trim().length * 8, 24)}, ${Math.max(85 - name.trim().length * 8, 24)}, ${Math.max(99 - name.trim().length * 8, 36)})`,
         opacity: allValid && !loading ? 1 : 0.9,
-        cursor: allValid && !loading ? "pointer" : "default",
+        cursor: loading ? "default" : "pointer",
         transition: "all 0.2s ease",
         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
         boxShadow: allValid && !loading ? "0 4px 16px rgba(249,58,37,0.45), 0 1px 3px rgba(0,0,0,0.1)" : "none",
