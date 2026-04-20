@@ -55,6 +55,14 @@ export default function LocationPicker({
   onLoadingChange,
   fieldError,
 }: Props) {
+  // DEBUG (temporary) — tells us whether the build-time env var made it
+  // into the client bundle. Remove once root cause is confirmed.
+  if (typeof window !== "undefined") {
+    console.log(
+      "[DEBUG] GOOGLE_PLACES_KEY:",
+      process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY ? "SET" : "MISSING",
+    );
+  }
   const inputRef = useRef<HTMLInputElement | null>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const [googleReady, setGoogleReady] = useState(false);

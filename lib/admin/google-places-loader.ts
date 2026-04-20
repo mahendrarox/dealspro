@@ -21,8 +21,14 @@ export function isGooglePlacesConfigured(): boolean {
 export function loadGooglePlaces(): Promise<typeof google> {
   if (loadPromise) return loadPromise;
 
+  // DEBUG (temporary) — trace the loader lifecycle in the browser console.
+  console.log("[DEBUG] Google Places loader: attempting to load");
+
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
+    console.error(
+      "[DEBUG] Google Places loader error: NEXT_PUBLIC_GOOGLE_PLACES_API_KEY is not set",
+    );
     return Promise.reject(new Error("NEXT_PUBLIC_GOOGLE_PLACES_API_KEY is not set"));
   }
 
@@ -35,6 +41,8 @@ export function loadGooglePlaces(): Promise<typeof google> {
   loadPromise = loader.load().catch((err) => {
     // Reset so a retry after a transient failure can try again.
     loadPromise = null;
+    // DEBUG (temporary) — surface the raw Google error string.
+    console.error("[DEBUG] Google Places loader error:", err);
     throw err;
   });
 
