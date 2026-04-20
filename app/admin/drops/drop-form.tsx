@@ -1,11 +1,16 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { createDrop, updateDrop } from "@/lib/admin/actions";
 import { type DropFormValues, toIso } from "./form-utils";
 
 // Re-export for backward compatibility with existing imports.
 export { emptyDropForm, isoToLocal, type DropFormValues } from "./form-utils";
+
+// Client-only: the Google loader touches `window`. Using `next/dynamic` with
+// ssr: false keeps the Google Places SDK out of the server bundle.
+const LocationPicker = dynamic(() => import("./location-picker"), { ssr: false });
 
 const T = {
   panel: "#14141A",
@@ -29,16 +34,35 @@ export default function DropForm({ mode, initial }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const update = <K extends keyof DropFormValues>(key: K, value: DropFormValues[K]) => {
     setValues((v) => ({ ...v, [key]: value }));
   };
+
+  // Stable patch handler used by LocationPicker — merges multiple fields atomically.
+  const patchValues = useCallback((patch: Partial<DropFormValues>) => {
+    setValues((v) => ({ ...v, ...patch }));
+  }, []);
+
+  const fieldError = useCallback(
+    (k: string) => fieldErrors[k]?.[0],
+    [fieldErrors],
+  );
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFieldErrors({});
     setFormError(null);
     setSuccess(null);
+
+    const locationPayload = {
+      address: values.address.trim() || null,
+      latitude: values.latitude === "" ? null : values.latitude,
+      longitude: values.longitude === "" ? null : values.longitude,
+      place_id: values.place_id.trim() || null,
+      location_mode: values.location_mode,
+    };
 
     const payload = {
       id: values.id.trim(),
@@ -53,6 +77,7 @@ export default function DropForm({ mode, initial }: Props) {
       is_active: values.is_active,
       is_hero: values.is_hero,
       priority: Number(values.priority) || 0,
+      ...locationPayload,
     };
 
     startTransition(async () => {
@@ -73,8 +98,6 @@ export default function DropForm({ mode, initial }: Props) {
     });
   };
 
-  const fieldError = (k: string) => fieldErrors[k]?.[0];
-
   const inputStyle: React.CSSProperties = {
     width: "100%",
     padding: "10px 12px",
@@ -94,6 +117,8 @@ export default function DropForm({ mode, initial }: Props) {
   };
   const errStyle: React.CSSProperties = { fontSize: 11, color: T.red, marginTop: 4 };
   const fieldWrap: React.CSSProperties = { marginBottom: 14 };
+
+  const submitDisabled = pending || locationLoading;
 
   return (
     <form onSubmit={onSubmit}>
@@ -120,18 +145,18 @@ export default function DropForm({ mode, initial }: Props) {
           {fieldError("id") && <div style={errStyle}>{fieldError("id")}</div>}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <div style={fieldWrap}>
-            <label style={labelStyle}>Title</label>
-            <input type="text" value={values.title} onChange={(e) => update("title", e.target.value)} style={inputStyle} required />
-            {fieldError("title") && <div style={errStyle}>{fieldError("title")}</div>}
-          </div>
-          <div style={fieldWrap}>
-            <label style={labelStyle}>Restaurant</label>
-            <input type="text" value={values.restaurant_name} onChange={(e) => update("restaurant_name", e.target.value)} style={inputStyle} required />
-            {fieldError("restaurant_name") && <div style={errStyle}>{fieldError("restaurant_name")}</div>}
-          </div>
+        <div style={fieldWrap}>
+          <label style={labelStyle}>Title</label>
+          <input type="text" value={values.title} onChange={(e) => update("title", e.target.value)} style={inputStyle} required />
+          {fieldError("title") && <div style={errStyle}>{fieldError("title")}</div>}
         </div>
+
+        <LocationPicker
+          values={values}
+          onChange={patchValues}
+          onLoadingChange={setLocationLoading}
+          fieldError={fieldError}
+        />
 
         <div style={fieldWrap}>
           <label style={labelStyle}>Image URL (leave empty for gradient fallback)</label>
@@ -231,20 +256,21 @@ export default function DropForm({ mode, initial }: Props) {
       <div style={{ display: "flex", gap: 12 }}>
         <button
           type="submit"
-          disabled={pending}
+          disabled={submitDisabled}
+          data-testid="drop-form-submit"
           style={{
             padding: "12px 24px",
             borderRadius: 10,
             border: "none",
-            background: pending ? "#3F3F46" : T.red,
+            background: submitDisabled ? "#3F3F46" : T.red,
             color: "#fff",
             fontSize: 14,
             fontWeight: 700,
-            cursor: pending ? "default" : "pointer",
+            cursor: submitDisabled ? "default" : "pointer",
             fontFamily: "'DM Sans', sans-serif",
           }}
         >
-          {pending ? "Saving..." : mode === "create" ? "Create drop" : "Save changes"}
+          {pending ? "Saving..." : locationLoading ? "Loading location…" : mode === "create" ? "Create drop" : "Save changes"}
         </button>
         <a
           href="/admin/drops"

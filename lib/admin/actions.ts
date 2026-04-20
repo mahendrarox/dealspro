@@ -2,13 +2,27 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "./auth";
-import { dropCreateSchema, dropUpdateSchema } from "./schemas";
+import { dropCreateSchema, dropUpdateSchema, type DropCreateInput, type DropUpdateInput } from "./schemas";
 import { adminDb } from "@/lib/supabase-admin";
 import { diffFields, logAdminAction } from "./log";
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T; noop?: boolean }
   | { ok: false; error?: string; fieldErrors?: Record<string, string[]> };
+
+/**
+ * Strip the form-only `location_mode` discriminator before persisting —
+ * it's a client/server validation hint, not a DB column. Everything else
+ * in the parsed schema maps 1:1 to a `drop_items` column.
+ */
+function toDbRow(parsed: DropCreateInput | DropUpdateInput) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { location_mode, ...rest } = parsed;
+  return {
+    ...rest,
+    image_url: rest.image_url || null,
+  };
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // CREATE
@@ -27,10 +41,7 @@ export async function createDrop(input: unknown): Promise<ActionResult> {
     return { ok: false, error: "Validation failed", fieldErrors: flat.fieldErrors as Record<string, string[]> };
   }
 
-  const row = {
-    ...parsed.data,
-    image_url: parsed.data.image_url || null,
-  };
+  const row = toDbRow(parsed.data);
 
   const { data, error } = await adminDb
     .from("drop_items")
@@ -75,10 +86,7 @@ export async function updateDrop(id: string, input: unknown): Promise<ActionResu
     return { ok: false, error: "Drop not found" };
   }
 
-  const nextRow = {
-    ...parsed.data,
-    image_url: parsed.data.image_url || null,
-  };
+  const nextRow = toDbRow(parsed.data);
 
   const changes = diffFields(current as Record<string, unknown>, nextRow as Record<string, unknown>);
   if (Object.keys(changes).length === 0) {

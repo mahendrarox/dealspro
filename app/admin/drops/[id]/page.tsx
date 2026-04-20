@@ -1,7 +1,7 @@
 import { requireAdmin } from "@/lib/admin/auth";
 import { adminDb } from "@/lib/supabase-admin";
 import DropForm from "../drop-form";
-import { isoToLocal } from "../form-utils";
+import { isoToLocal, type LocationMode } from "../form-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +20,11 @@ type ValidatedDrop = {
   is_active: boolean;
   is_hero: boolean;
   priority: string;
+  address: string;
+  latitude: string;
+  longitude: string;
+  place_id: string;
+  location_mode: LocationMode;
 };
 
 type ValidationResult =
@@ -51,6 +56,17 @@ function validateDrop(data: Record<string, unknown> | null, id: string): Validat
     return { ok: false, error: `Invalid end_time for drop ${id}: ${String(data.end_time)}` };
   }
 
+  // Existing rows may predate the location migration — read defensively
+  // and default to empty strings so the form never crashes.
+  const address = data.address == null ? "" : String(data.address);
+  const placeId = data.place_id == null ? "" : String(data.place_id);
+  const latitude = data.latitude == null ? "" : String(data.latitude);
+  const longitude = data.longitude == null ? "" : String(data.longitude);
+  // If we already have a Google place_id, resume in autocomplete mode so
+  // the UI shows the locked card with a Change Restaurant button.
+  // Otherwise start in manual mode to surface partial/legacy data.
+  const location_mode: LocationMode = placeId ? "autocomplete" : "manual";
+
   return {
     ok: true,
     drop: {
@@ -66,6 +82,11 @@ function validateDrop(data: Record<string, unknown> | null, id: string): Validat
       is_active: !!data.is_active,
       is_hero: !!data.is_hero,
       priority: String(data.priority ?? 0),
+      address,
+      latitude,
+      longitude,
+      place_id: placeId,
+      location_mode,
     },
   };
 }
@@ -133,7 +154,7 @@ export default async function EditDropPage({ params }: { params: Promise<{ id: s
   const { data, error: fetchError } = await adminDb
     .from("drop_items")
     .select(
-      "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority",
+      "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, address, latitude, longitude, place_id",
     )
     .eq("id", id)
     .maybeSingle();

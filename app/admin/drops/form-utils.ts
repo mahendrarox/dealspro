@@ -8,6 +8,8 @@
  * helpers as client-only and breaking SSR.
  */
 
+export type LocationMode = "autocomplete" | "manual";
+
 export type DropFormValues = {
   id: string;
   title: string;
@@ -21,6 +23,13 @@ export type DropFormValues = {
   is_active: boolean;
   is_hero: boolean;
   priority: string;
+  // Location fields — strings so empty input round-trips cleanly.
+  // The server coerces `latitude`/`longitude` via zod.
+  address: string;
+  latitude: string;
+  longitude: string;
+  place_id: string;
+  location_mode: LocationMode;
 };
 
 export const emptyDropForm = (): DropFormValues => ({
@@ -36,6 +45,11 @@ export const emptyDropForm = (): DropFormValues => ({
   is_active: false,
   is_hero: false,
   priority: "0",
+  address: "",
+  latitude: "",
+  longitude: "",
+  place_id: "",
+  location_mode: "autocomplete",
 });
 
 /** Convert a datetime-local input string (local tz) to ISO-8601 with timezone. */

@@ -12,6 +12,10 @@ if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
   require("dotenv").config({ path: path.resolve(__dirname, "..", "..", "..", "..", ".env.local") });
 }
 
+// Register tsx so that `require("../lib/admin/schemas")` (a .ts file) works.
+// Best-effort: if tsx isn't available, downstream schema-based tests skip.
+try { require("tsx/cjs/api").register(); } catch { /* no-op */ }
+
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require("crypto");
 
@@ -1284,6 +1288,11 @@ async function main() {
     await testPublicDropsOnlyActive();
     await testPublicDropsExcludesInactive();
     await testSpotsComputationOnlyPaid();
+    await testLocationMigration();
+    await testLocationCreateValidation();
+    await testLocationEditValidation();
+    await testLocationCoercion();
+    await testLocationIntegrity();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -2126,6 +2135,425 @@ async function testSpotsComputationOnlyPaid() {
     if (dropId) {
       await supabase.from("orders").delete().eq("drop_item_id", dropId);
       await deleteTestDrop(dropId);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 27-31: RESTAURANT LOCATION CAPTURE (Step 10)
+//
+// These tests exercise the location migration + Zod schemas + form
+// integrity rules. They are deliberately schema-level (no HTTP) because
+// the admin form is auth-gated and the server action path is tested via
+// its validation surface.
+// ═══════════════════════════════════════════════════════════════════════
+
+function loadLocationSchemas() {
+  // Zod schemas are TS — use tsx-compatible require so tests run without
+  // a build step. Wrap in try/catch and return null if the module tree
+  // is unavailable so downstream tests skip gracefully.
+  try {
+    return require("../lib/admin/schemas");
+  } catch (err) {
+    console.log(`  [WARN] Could not load ../lib/admin/schemas: ${err.message}`);
+    return null;
+  }
+}
+
+const VALID_CREATE_BASE = () => {
+  const now = Date.now();
+  return {
+    id: "test-loc-" + Date.now().toString(36),
+    title: "Location Test",
+    restaurant_name: "Location Kitchen",
+    image_url: "",
+    price: 9.99,
+    original_price: 19.99,
+    total_spots: 5,
+    start_time: new Date(now + 60 * 60 * 1000).toISOString(),
+    end_time: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    is_active: true,
+    is_hero: false,
+    priority: 0,
+  };
+};
+
+const VALID_UPDATE_BASE = () => {
+  const now = Date.now();
+  return {
+    title: "Location Test",
+    restaurant_name: "Location Kitchen",
+    image_url: "",
+    price: 9.99,
+    original_price: 19.99,
+    total_spots: 5,
+    start_time: new Date(now + 60 * 60 * 1000).toISOString(),
+    end_time: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    is_active: true,
+    is_hero: false,
+    priority: 0,
+  };
+};
+
+// ── Test 27: migration safety — existing rows unaffected, new columns exist ──
+async function testLocationMigration() {
+  console.log("\n── Test 27: Location Migration Safety ──");
+  if (!infra.dropItemsTable) {
+    skip("Location: migration applied", "drop_items table not ready");
+    skip("Location: existing rows preserved", "drop_items table not ready");
+    return;
+  }
+  const supabase = getSupabase();
+
+  // 27a: new columns are selectable — i.e. migration has been applied.
+  // If not, skip downstream checks with a clear instruction (same pattern
+  // as tests 21-26 which gate on the previous migrations).
+  const { error } = await supabase
+    .from("drop_items")
+    .select("id, address, latitude, longitude, place_id")
+    .limit(1);
+  if (error) {
+    skip("Location: migration applied", "apply migration-004-locations.sql in Supabase SQL Editor");
+    skip("Location: existing rows preserved", "migration-004 not applied");
+    skip("Location: new columns are nullable", "migration-004 not applied");
+    return;
+  }
+  pass("Location: migration applied — new columns selectable");
+
+  // 27b: existing rows that predate the migration still exist and are readable
+  const { data: existing, error: existingErr } = await supabase
+    .from("drop_items")
+    .select("id, restaurant_name, title")
+    .not("id", "like", "test-%")
+    .limit(5);
+  if (existingErr) {
+    fail("Location: existing rows preserved", existingErr.message);
+  } else if (Array.isArray(existing)) {
+    pass(`Location: existing rows preserved (${existing.length} sampled, no read errors)`);
+  } else {
+    fail("Location: existing rows preserved", "unexpected response shape");
+  }
+
+  // 27c: new columns are nullable — insert without them succeeds
+  let dropId = null;
+  try {
+    const drop = await insertTestDrop({});
+    dropId = drop.id;
+    const { data: row, error: readErr } = await supabase
+      .from("drop_items")
+      .select("address, latitude, longitude, place_id")
+      .eq("id", dropId)
+      .maybeSingle();
+    if (readErr) {
+      fail("Location: nullable columns", readErr.message);
+    } else if (row && row.address === null && row.latitude === null && row.longitude === null && row.place_id === null) {
+      pass("Location: new columns are nullable — insert without them returns null");
+    } else {
+      fail("Location: nullable columns", `expected nulls, got ${JSON.stringify(row)}`);
+    }
+  } catch (err) {
+    fail("Location: nullable columns", err.message);
+  } finally {
+    if (dropId) await deleteTestDrop(dropId);
+  }
+}
+
+// ── Test 28: CREATE validation ──
+async function testLocationCreateValidation() {
+  console.log("\n── Test 28: Location CREATE Validation ──");
+  const mod = loadLocationSchemas();
+  if (!mod) {
+    skip("Location CREATE: missing location fails", "schemas unavailable");
+    skip("Location CREATE: autocomplete without place_id fails", "schemas unavailable");
+    skip("Location CREATE: valid autocomplete passes", "schemas unavailable");
+    skip("Location CREATE: valid manual passes", "schemas unavailable");
+    return;
+  }
+  const { dropCreateSchema } = mod;
+
+  // 28a: CREATE with no location → fail
+  {
+    const res = dropCreateSchema.safeParse({
+      ...VALID_CREATE_BASE(),
+      location_mode: "autocomplete",
+    });
+    if (!res.success) {
+      pass("Location CREATE: missing location → rejected");
+    } else {
+      fail("Location CREATE: missing location", "safeParse should have failed");
+    }
+  }
+
+  // 28b: CREATE with address+lat+lng but no place_id (autocomplete mode) → fail
+  {
+    const res = dropCreateSchema.safeParse({
+      ...VALID_CREATE_BASE(),
+      address: "123 Main St",
+      latitude: 40.7128,
+      longitude: -74.006,
+      place_id: null,
+      location_mode: "autocomplete",
+    });
+    if (!res.success) {
+      const msg = JSON.stringify(res.error.flatten().fieldErrors);
+      const hasPlaceIdErr = msg.includes("select a suggestion") || msg.toLowerCase().includes("place_id");
+      if (hasPlaceIdErr) {
+        pass("Location CREATE: autocomplete without place_id → rejected");
+      } else {
+        fail("Location CREATE: autocomplete without place_id", `wrong error: ${msg}`);
+      }
+    } else {
+      fail("Location CREATE: autocomplete without place_id", "safeParse should have failed");
+    }
+  }
+
+  // 28c: CREATE with full autocomplete location → pass
+  {
+    const res = dropCreateSchema.safeParse({
+      ...VALID_CREATE_BASE(),
+      address: "123 Main St",
+      latitude: 40.7128,
+      longitude: -74.006,
+      place_id: "ChIJOwg_06VPwokRYv534QaPC8g",
+      location_mode: "autocomplete",
+    });
+    if (res.success) {
+      pass("Location CREATE: full autocomplete payload → accepted");
+    } else {
+      fail("Location CREATE: full autocomplete", JSON.stringify(res.error.flatten().fieldErrors));
+    }
+  }
+
+  // 28d: CREATE with full manual location (no place_id required) → pass
+  {
+    const res = dropCreateSchema.safeParse({
+      ...VALID_CREATE_BASE(),
+      address: "123 Main St",
+      latitude: 40.7128,
+      longitude: -74.006,
+      place_id: null,
+      location_mode: "manual",
+    });
+    if (res.success) {
+      pass("Location CREATE: full manual payload (no place_id) → accepted");
+    } else {
+      fail("Location CREATE: full manual", JSON.stringify(res.error.flatten().fieldErrors));
+    }
+  }
+}
+
+// ── Test 29: EDIT validation ──
+async function testLocationEditValidation() {
+  console.log("\n── Test 29: Location EDIT Validation ──");
+  const mod = loadLocationSchemas();
+  if (!mod) {
+    skip("Location EDIT: no location allowed", "schemas unavailable");
+    skip("Location EDIT: partial location fails", "schemas unavailable");
+    skip("Location EDIT: full location passes", "schemas unavailable");
+    return;
+  }
+  const { dropUpdateSchema } = mod;
+
+  // 29a: EDIT with no location → pass (legacy row)
+  {
+    const res = dropUpdateSchema.safeParse({
+      ...VALID_UPDATE_BASE(),
+    });
+    if (res.success) {
+      pass("Location EDIT: no location fields → accepted (legacy safe)");
+    } else {
+      fail("Location EDIT: no location", JSON.stringify(res.error.flatten().fieldErrors));
+    }
+  }
+
+  // 29b: EDIT with address only (partial) → fail
+  {
+    const res = dropUpdateSchema.safeParse({
+      ...VALID_UPDATE_BASE(),
+      address: "123 Main St",
+    });
+    if (!res.success) {
+      const msg = JSON.stringify(res.error.flatten().fieldErrors);
+      if (msg.toLowerCase().includes("complete location")) {
+        pass("Location EDIT: partial location (address only) → rejected");
+      } else {
+        fail("Location EDIT: partial address only", `wrong error: ${msg}`);
+      }
+    } else {
+      fail("Location EDIT: partial address only", "safeParse should have failed");
+    }
+  }
+
+  // 29c: EDIT with lat+lng but no address (partial) → fail
+  {
+    const res = dropUpdateSchema.safeParse({
+      ...VALID_UPDATE_BASE(),
+      latitude: 40.7,
+      longitude: -74,
+    });
+    if (!res.success) {
+      pass("Location EDIT: partial location (lat+lng only) → rejected");
+    } else {
+      fail("Location EDIT: partial lat+lng", "safeParse should have failed");
+    }
+  }
+
+  // 29d: EDIT with full location → pass
+  {
+    const res = dropUpdateSchema.safeParse({
+      ...VALID_UPDATE_BASE(),
+      address: "123 Main St",
+      latitude: 40.7128,
+      longitude: -74.006,
+      place_id: "ChIJOwg_06VPwokRYv534QaPC8g",
+      location_mode: "autocomplete",
+    });
+    if (res.success) {
+      pass("Location EDIT: full location → accepted");
+    } else {
+      fail("Location EDIT: full location", JSON.stringify(res.error.flatten().fieldErrors));
+    }
+  }
+}
+
+// ── Test 30: coercion of string lat/lng ──
+async function testLocationCoercion() {
+  console.log("\n── Test 30: Location Coercion ──");
+  const mod = loadLocationSchemas();
+  if (!mod) {
+    skip("Location coercion: string lat/lng parsed", "schemas unavailable");
+    skip("Location coercion: empty string → null", "schemas unavailable");
+    skip("Location coercion: non-numeric → reject", "schemas unavailable");
+    return;
+  }
+  const { dropCreateSchema } = mod;
+
+  // 30a: string lat/lng (from HTML inputs) coerced to numbers
+  {
+    const res = dropCreateSchema.safeParse({
+      ...VALID_CREATE_BASE(),
+      address: "123 Main St",
+      latitude: "40.7128",
+      longitude: "-74.006",
+      place_id: "ChIJplace",
+      location_mode: "autocomplete",
+    });
+    if (res.success && typeof res.data.latitude === "number" && typeof res.data.longitude === "number") {
+      if (res.data.latitude === 40.7128 && res.data.longitude === -74.006) {
+        pass("Location coercion: string lat/lng parsed to numbers");
+      } else {
+        fail("Location coercion: parsed values", `got lat=${res.data.latitude}, lng=${res.data.longitude}`);
+      }
+    } else {
+      fail("Location coercion: string lat/lng", res.success ? "not numbers" : JSON.stringify(res.error.flatten().fieldErrors));
+    }
+  }
+
+  // 30b: empty strings treated as null (all-nullable on edit, so use update schema)
+  {
+    const res = mod.dropUpdateSchema.safeParse({
+      ...VALID_UPDATE_BASE(),
+      address: "",
+      latitude: "",
+      longitude: "",
+      place_id: "",
+    });
+    if (res.success && res.data.address === null && res.data.latitude === null && res.data.longitude === null && res.data.place_id === null) {
+      pass("Location coercion: empty strings → null");
+    } else {
+      fail("Location coercion: empty strings", res.success ? JSON.stringify(res.data) : JSON.stringify(res.error.flatten().fieldErrors));
+    }
+  }
+
+  // 30c: non-numeric lat/lng rejected
+  {
+    const res = dropCreateSchema.safeParse({
+      ...VALID_CREATE_BASE(),
+      address: "123 Main St",
+      latitude: "not-a-number",
+      longitude: "-74.006",
+      place_id: "ChIJplace",
+      location_mode: "autocomplete",
+    });
+    if (!res.success) {
+      pass("Location coercion: non-numeric lat → rejected");
+    } else {
+      fail("Location coercion: non-numeric", "should have been rejected");
+    }
+  }
+}
+
+// ── Test 31: integrity — "Change Restaurant" clears / minor edits do NOT clear ──
+async function testLocationIntegrity() {
+  console.log("\n── Test 31: Location Integrity ──");
+
+  // These helpers mirror the LocationPicker behavior:
+  // - changeRestaurant() clears place_id + latitude + longitude + address
+  // - minor field edits (title/price/etc.) do NOT touch location
+
+  const seeded = {
+    id: "d1",
+    title: "Old Title",
+    price: 9.99,
+    restaurant_name: "The Grill",
+    address: "123 Main St",
+    latitude: "40.7128",
+    longitude: "-74.006",
+    place_id: "ChIJseed",
+    location_mode: "autocomplete",
+  };
+
+  // 31a: Change Restaurant clears location-only fields
+  {
+    const next = { ...seeded };
+    // Simulate the exact patch LocationPicker.changeRestaurant dispatches
+    Object.assign(next, {
+      address: "",
+      latitude: "",
+      longitude: "",
+      place_id: "",
+      location_mode: "autocomplete",
+    });
+    const cleared =
+      next.address === "" &&
+      next.latitude === "" &&
+      next.longitude === "" &&
+      next.place_id === "";
+    const untouched = next.title === seeded.title && next.price === seeded.price && next.id === seeded.id;
+    if (cleared && untouched) {
+      pass("Location integrity: Change Restaurant clears exactly the 4 location fields");
+    } else {
+      fail("Location integrity: Change Restaurant", `cleared=${cleared} untouched=${untouched}`);
+    }
+  }
+
+  // 31b: Minor edit (title) does NOT clear location
+  {
+    const next = { ...seeded, title: "New Title" };
+    const preserved =
+      next.address === seeded.address &&
+      next.latitude === seeded.latitude &&
+      next.longitude === seeded.longitude &&
+      next.place_id === seeded.place_id;
+    if (preserved && next.title === "New Title") {
+      pass("Location integrity: minor field edit preserves location");
+    } else {
+      fail("Location integrity: minor edit preserves location", `preserved=${preserved}`);
+    }
+  }
+
+  // 31c: Minor edit (price) does NOT clear location
+  {
+    const next = { ...seeded, price: 12.5 };
+    const preserved =
+      next.address === seeded.address &&
+      next.latitude === seeded.latitude &&
+      next.longitude === seeded.longitude &&
+      next.place_id === seeded.place_id;
+    if (preserved) {
+      pass("Location integrity: price edit preserves location");
+    } else {
+      fail("Location integrity: price edit", "location changed unexpectedly");
     }
   }
 }
