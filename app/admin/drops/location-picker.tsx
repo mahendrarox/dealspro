@@ -55,16 +55,9 @@ export default function LocationPicker({
   onLoadingChange,
   fieldError,
 }: Props) {
-  // DEBUG (temporary) — tells us whether the build-time env var made it
-  // into the client bundle. Remove once root cause is confirmed.
-  if (typeof window !== "undefined") {
-    console.log(
-      "[DEBUG] GOOGLE_PLACES_KEY:",
-      process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY ? "SET" : "MISSING",
-    );
-  }
   const inputRef = useRef<HTMLInputElement | null>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const placesLibRef = useRef<google.maps.PlacesLibrary | null>(null);
   const [googleReady, setGoogleReady] = useState(false);
   const [fallback, setFallback] = useState(!isGooglePlacesConfigured());
   const [loading, setLoading] = useState(false);
@@ -80,8 +73,10 @@ export default function LocationPicker({
     if (values.location_mode === "manual" || fallback) return;
     let cancelled = false;
     loadGooglePlaces()
-      .then(() => {
-        if (!cancelled) setGoogleReady(true);
+      .then((placesLib) => {
+        if (cancelled) return;
+        placesLibRef.current = placesLib;
+        setGoogleReady(true);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -99,9 +94,11 @@ export default function LocationPicker({
     if (!googleReady || locked || fallback || values.location_mode === "manual") return;
     if (!inputRef.current) return;
     if (autocompleteRef.current) return; // already attached
+    const placesLib = placesLibRef.current;
+    if (!placesLib) return;
 
     try {
-      const ac = new google.maps.places.Autocomplete(inputRef.current, {
+      const ac = new placesLib.Autocomplete(inputRef.current, {
         fields: ["place_id", "name", "formatted_address", "geometry"],
         types: ["establishment"],
       });

@@ -1,50 +1,48 @@
 /**
- * Google Maps JS API loader — singleton.
+ * Google Maps JS API loader — singleton (v2 functional API).
  *
- * Uses `@googlemaps/js-api-loader` so we never inject a `<script>` tag
- * and never double-load the API. `loader.load()` is itself idempotent,
- * but we wrap it in a module-level promise so React strict-mode double
- * renders and multiple form mounts reuse the same network request.
+ * `@googlemaps/js-api-loader` v2 removed the `Loader` class. We use the
+ * new functional API: `setOptions()` registers the key + version once,
+ * then `importLibrary('places')` lazy-loads the Places library and
+ * returns it.
+ *
+ * Module-level promise caches the `importLibrary('places')` result so
+ * React strict-mode double renders and multiple picker mounts share a
+ * single network request.
  *
  * Client-only. Callers must ensure they run inside a `useEffect` or a
  * dynamic import with `ssr: false`.
  */
 
-import { Loader } from "@googlemaps/js-api-loader";
+import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 
-let loadPromise: Promise<typeof google> | null = null;
+let placesPromise: Promise<google.maps.PlacesLibrary> | null = null;
+let optionsSet = false;
 
 export function isGooglePlacesConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY);
 }
 
-export function loadGooglePlaces(): Promise<typeof google> {
-  if (loadPromise) return loadPromise;
-
-  // DEBUG (temporary) — trace the loader lifecycle in the browser console.
-  console.log("[DEBUG] Google Places loader: attempting to load");
+export function loadGooglePlaces(): Promise<google.maps.PlacesLibrary> {
+  if (placesPromise) return placesPromise;
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
-    console.error(
-      "[DEBUG] Google Places loader error: NEXT_PUBLIC_GOOGLE_PLACES_API_KEY is not set",
-    );
     return Promise.reject(new Error("NEXT_PUBLIC_GOOGLE_PLACES_API_KEY is not set"));
   }
 
-  const loader = new Loader({
-    apiKey,
-    version: "weekly",
-    libraries: ["places"],
-  });
+  // setOptions must be called before any importLibrary. Guard so a
+  // remount after a transient failure doesn't re-register.
+  if (!optionsSet) {
+    setOptions({ key: apiKey, v: "weekly" });
+    optionsSet = true;
+  }
 
-  loadPromise = loader.load().catch((err) => {
+  placesPromise = importLibrary("places").catch((err) => {
     // Reset so a retry after a transient failure can try again.
-    loadPromise = null;
-    // DEBUG (temporary) — surface the raw Google error string.
-    console.error("[DEBUG] Google Places loader error:", err);
+    placesPromise = null;
     throw err;
   });
 
-  return loadPromise;
+  return placesPromise;
 }
