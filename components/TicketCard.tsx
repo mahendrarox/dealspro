@@ -47,7 +47,7 @@ const C = {
   text: "#111827",
   textMuted: "#6B7280",
   textDim: "#9CA3AF",
-  green: "#22C55E",
+  green: "#16A34A",
   greenBg: "#ECFDF5",
   greenFg: "#059669",
   redeemed: "#EF4444",
@@ -174,9 +174,10 @@ export default function TicketCard(props: TicketCardProps) {
   const statusLabel =
     status === "active" ? "✓ Active" : status === "redeemed" ? "Redeemed" : "Expired";
   const statusColor =
-    status === "active" ? C.green : status === "redeemed" ? C.redeemed : C.textDim;
+    status === "active" ? C.white : status === "redeemed" ? C.redeemed : C.textDim;
   const statusBg =
-    status === "active" ? "#DCFCE7" : status === "redeemed" ? "#FEE2E2" : "#F3F4F6";
+    status === "active" ? C.green : status === "redeemed" ? "#FEE2E2" : "#F3F4F6";
+  const statusPadding = status === "active" ? "6px 18px" : "5px 10px";
 
   const directionsUrl = drop ? buildDirectionsUrl(drop) : null;
 
@@ -241,18 +242,39 @@ export default function TicketCard(props: TicketCardProps) {
               gap: "12px",
             }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo.png"
-              alt="DealsPro"
+            <div
               style={{
-                height: "36px",
-                width: "auto",
-                maxWidth: "160px",
-                objectFit: "contain",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
                 flexShrink: 0,
               }}
-            />
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="DealsPro"
+                style={{
+                  height: "36px",
+                  width: "auto",
+                  maxWidth: "160px",
+                  objectFit: "contain",
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  fontFamily: F.display,
+                  fontSize: "22px",
+                  fontWeight: 800,
+                  letterSpacing: "-0.01em",
+                  lineHeight: 1,
+                }}
+              >
+                <span style={{ color: "#1A1A1A" }}>Deals</span>
+                <span style={{ color: C.red }}>Pro</span>
+              </span>
+            </div>
             <div
               style={{
                 display: "inline-flex",
@@ -265,7 +287,7 @@ export default function TicketCard(props: TicketCardProps) {
                 fontSize: "11px",
                 color: C.textMuted,
                 whiteSpace: "nowrap",
-                overflow: "hidden",
+                flexShrink: 0,
               }}
             >
               <span style={{ fontFamily: F.mono, fontWeight: 600, color: C.text }}>
@@ -416,9 +438,9 @@ export default function TicketCard(props: TicketCardProps) {
                 </div>
                 <div style={{ fontSize: "14px", color: C.textMuted, fontWeight: 500 }}>
                   {drop?.restaurantName ?? ""}
-                  {quantity > 1 && drop?.restaurantName && (
+                  {drop?.restaurantName && (
                     <>
-                      {" · "}× {quantity} spots
+                      {" · "}× {quantity} {quantity === 1 ? "spot" : "spots"}
                     </>
                   )}
                 </div>
@@ -431,7 +453,7 @@ export default function TicketCard(props: TicketCardProps) {
                   fontWeight: 700,
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
-                  padding: "5px 10px",
+                  padding: statusPadding,
                   borderRadius: "9999px",
                   background: statusBg,
                   color: statusColor,
