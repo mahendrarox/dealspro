@@ -38,13 +38,10 @@ function devRedemption(daysFromToday: number): string {
   return `${dateStr}T23:59:00`;
 }
 
-/** If it's already past the given hour today, shift all drops forward by 1 day */
-const _now = new Date();
-const _todayPastEvening = _now.getHours() >= 19;
-const _baseOffset = _todayPastEvening ? 1 : 0;
-
-// Drop schedule: 2 today, 2 tomorrow, 2 day+2, 2 day+3
-const _dayOffsets = [0, 0, 1, 1, 2, 2, 3, 3].map((d) => d + _baseOffset);
+// Drop schedule: one drop per day, spread across +2 .. +9 days from "today"
+// in the server's local (Central) timezone. Minimum +2 guarantees every drop
+// is at least ~24h ahead regardless of the hour at which the seed is run.
+const _dayOffsets = [2, 3, 4, 5, 6, 7, 8, 9];
 const _dropWeekId = `week_dev_dynamic`;
 
 // ─── Drop Items (dynamic dates) ──────────────────────────────────────
