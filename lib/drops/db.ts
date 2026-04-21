@@ -14,9 +14,9 @@ import type { DropItem } from "./types";
 // ─── Full schema select ──────────────────────────────────────────────
 
 const DB_SELECT_COLS =
-  "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, created_at, updated_at";
+  "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, created_at, updated_at, address, latitude, longitude";
 
-// ─── DB row type (matches all 14 columns) ────────────────────────────
+// ─── DB row type ─────────────────────────────────────────────────────
 
 type DbDropRow = {
   id: string;
@@ -33,6 +33,9 @@ type DbDropRow = {
   priority: number;
   created_at: string;
   updated_at: string;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 // ─── Mapper: DB row → DropItem (zero synthesis) ──────────────────────
@@ -64,9 +67,9 @@ function dbRowToDropItem(row: DbDropRow): DropItem {
     status: row.is_active ? "live" : "expired",
     stripe_price_id: "",
     redemption_valid_until: end.toISOString(),
-    address: "",
-    lat: 0,
-    lng: 0,
+    address: row.address ?? "",
+    lat: row.latitude ?? 0,
+    lng: row.longitude ?? 0,
     is_hero: row.is_hero,
     priority: row.priority,
   };
