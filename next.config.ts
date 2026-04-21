@@ -15,6 +15,15 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async redirects() {
+    return [
+      {
+        source: "/biz/scan",
+        destination: "/scan",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
