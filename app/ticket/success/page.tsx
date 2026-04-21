@@ -1,8 +1,9 @@
 import QRCode from "qrcode";
 import { supabase } from "@/lib/supabase";
 import { getDropByIdForServer } from "@/lib/drops/db";
-import { formatTimeWindow, formatDate, getSavings } from "@/lib/drops/helpers";
-import SuccessClient from "@/components/SuccessClient";
+import { isRedemptionValid } from "@/lib/drops/helpers";
+import SuccessClient, { type SuccessInitialData } from "@/components/SuccessClient";
+import type { TicketDrop, TicketStatus } from "@/components/TicketCard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,16 +14,12 @@ export default async function SuccessPage({
 }) {
   const { session_id } = await searchParams;
 
-  let order = null;
-  let qrDataUrl = null;
-  let dealCardUrl = null;
-  let dropItemData = null;
+  let initial: SuccessInitialData | null = null;
 
   if (session_id) {
-    console.log("[success] Querying orders with stripe_session_id:", session_id);
     const { data, error: queryError } = await supabase
       .from("orders")
-      .select("drop_item_id, drop_title, restaurant_name, price_paid, qr_token, quantity")
+      .select("*")
       .eq("stripe_session_id", session_id)
       .maybeSingle();
 
@@ -34,47 +31,47 @@ export default async function SuccessPage({
     }
 
     if (data?.qr_token) {
-      order = data;
-      dealCardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/ticket/${data.qr_token}`;
-      qrDataUrl = await QRCode.toDataURL(dealCardUrl, {
-        width: 200,
+      const dealCardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/ticket/${data.qr_token}`;
+      const qrDataUrl = await QRCode.toDataURL(dealCardUrl, {
+        width: 240,
         margin: 2,
         color: { dark: "#18181B", light: "#FFFFFF" },
       });
-      if (data.drop_item_id) {
-        const item = await getDropByIdForServer(data.drop_item_id);
-        if (item) {
-          const qty = data.quantity ?? 1;
-          dropItemData = {
-            date: formatDate(item),
-            timeWindow: formatTimeWindow(item),
-            redemptionValidUntil: item.redemption_valid_until,
-            savings: `$${(getSavings(item) * qty).toFixed(2)}`,
+
+      const item = data.drop_item_id ? await getDropByIdForServer(data.drop_item_id) : null;
+      const drop: TicketDrop | null = item
+        ? {
             title: item.title,
             restaurantName: item.restaurant_name,
-            quantity: qty,
+            price: item.price,
+            originalPrice:
+              item.original_price && item.original_price > 0 ? item.original_price : null,
+            date: item.date,
             startTime: item.start_time,
-          };
-        }
-      }
+            endTime: item.end_time,
+            address: item.address || null,
+            lat: item.lat || null,
+            lng: item.lng || null,
+          }
+        : null;
+
+      const isRedeemed = data.redemption_status === "redeemed";
+      const isExpired = item ? !isRedemptionValid(item) : false;
+      const status: TicketStatus = isRedeemed ? "redeemed" : isExpired ? "expired" : "active";
+
+      initial = {
+        orderId: data.id ?? data.qr_token,
+        qrToken: data.qr_token,
+        phone: data.phone ?? null,
+        quantity: data.quantity ?? 1,
+        pricePaid: Number(data.price_paid),
+        status,
+        redeemedAt: data.redeemed_at ?? null,
+        qrDataUrl,
+        drop,
+      };
     }
   }
 
-  // Fallback savings if no drop item found
-  const savings = dropItemData?.savings ?? "$9.99";
-  const pickupWindow = dropItemData?.timeWindow ?? "TBD";
-
-  return (
-    <SuccessClient
-      order={order}
-      qrDataUrl={qrDataUrl}
-      savings={savings}
-      pickupWindow={pickupWindow}
-      dealCardUrl={dealCardUrl}
-      date={dropItemData?.date ?? null}
-      redemptionValidUntil={dropItemData?.redemptionValidUntil ?? null}
-      quantity={dropItemData?.quantity ?? 1}
-      startTime={dropItemData?.startTime ?? null}
-    />
-  );
+  return <SuccessClient initial={initial} />;
 }
