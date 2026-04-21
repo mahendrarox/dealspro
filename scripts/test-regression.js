@@ -664,7 +664,7 @@ async function testPageRenders() {
     { url: "/", expect: 200, contains: "Exclusive Restaurant Deals", name: "Homepage" },
     { url: "/drop/drop-biryani-apr07", expect: 200, contains: "Biryani Night", name: "Drop page" },
     { url: "/ticket/success", expect: 200, contains: null, name: "Success page (no session)", infraKey: "successPage" },
-    { url: "/biz/scan", expect: 200, contains: "Redeem", name: "Biz scan page" },
+    { url: "/scan", expect: 200, contains: "Redeem", name: "Scan page" },
   ];
 
   for (const p of pages) {
@@ -1055,21 +1055,21 @@ async function testQuantity() {
     }
   }
 
-  // 13k: Biz scan page renders
+  // 13k: Scan page renders
   try {
-    const res = await fetchWithRetry(`${BASE_URL}/biz/scan`);
+    const res = await fetchWithRetry(`${BASE_URL}/scan`);
     if (res.status === 200) {
       const html = await res.text();
       if (html.includes("Redeem")) {
-        pass("Qty: /biz/scan renders with Redeem button");
+        pass("Qty: /scan renders with Redeem button");
       } else {
-        fail("Qty: /biz/scan", "Missing 'Redeem'");
+        fail("Qty: /scan", "Missing 'Redeem'");
       }
     } else {
-      fail("Qty: /biz/scan", `Status ${res.status}`);
+      fail("Qty: /scan", `Status ${res.status}`);
     }
   } catch (err) {
-    fail("Qty: /biz/scan", err.message);
+    fail("Qty: /scan", err.message);
   }
 }
 
@@ -1433,7 +1433,7 @@ async function testPhoneCapture() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// TEST 16: Phone Search on /biz/scan
+// TEST 16: Phone Search on /scan
 // ═══════════════════════════════════════════════════════════════════════
 
 async function testPhoneSearch() {
