@@ -72,18 +72,34 @@ export async function POST(request: NextRequest) {
     }
     const phone = normalizePhone(rawPhone);
 
-    // Duplicate check
-    const { data: existing } = await supabase
+    // Duplicate check — block on ANY prior order (paid or pending) but
+    // surface only the paid-spot count to the user so a pending/failed
+    // row doesn't inflate the "you already have N spots" message.
+    const { data: priorOrders } = await supabase
       .from("orders")
-      .select("id")
+      .select("status, quantity")
       .eq("phone", phone)
-      .eq("drop_item_id", drop_item_id)
-      .eq("status", CONFIRMED_STATUS)
-      .maybeSingle();
+      .eq("drop_item_id", drop_item_id);
 
-    if (existing) {
+    if (priorOrders && priorOrders.length > 0) {
+      const paidOrders = priorOrders.filter((o) => o.status === CONFIRMED_STATUS);
+      const existingQuantity = paidOrders.reduce(
+        (sum, o) => sum + (Number(o.quantity) || 0),
+        0,
+      );
+      const spotWord = existingQuantity === 1 ? "spot is" : "spots are";
+      const message =
+        existingQuantity > 0
+          ? `You're all set — your ${existingQuantity} ${spotWord} confirmed for ${dbRow.title}. 🎉\n\nEach person can claim once per drop. Want more spots? Share this deal with friends — they can claim using their own number.`
+          : `You've already started a claim for ${dbRow.title}. We're still confirming your payment — please check back in a moment.\n\nEach person can claim once per drop.`;
+
       return NextResponse.json(
-        { error: "You already claimed this spot" },
+        {
+          error: "already_claimed",
+          message,
+          existingQuantity,
+          dropTitle: dbRow.title,
+        },
         { status: 409 },
       );
     }

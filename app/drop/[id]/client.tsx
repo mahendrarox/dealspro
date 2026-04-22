@@ -23,6 +23,23 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [phone, setPhone] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
+  // In-memory only — per-session. Clears on refresh (server re-checks then).
+  const [alreadyClaimedMessage, setAlreadyClaimedMessage] = useState<string | null>(null);
+  const [claimedForPhone, setClaimedForPhone] = useState<string | null>(null);
+
+  // If the phone changes after an already-claimed response, reset the banner
+  // so the user can retry with the new number.
+  useEffect(() => {
+    if (
+      alreadyClaimedMessage &&
+      claimedForPhone !== null &&
+      phone !== null &&
+      phone !== claimedForPhone
+    ) {
+      setAlreadyClaimedMessage(null);
+      setClaimedForPhone(null);
+    }
+  }, [phone, alreadyClaimedMessage, claimedForPhone]);
 
   // Fetch live spots every 15s
   useEffect(() => {
@@ -92,6 +109,11 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
       if (data.checkoutUrl) {
         setShowConfirm(true);
         setTimeout(() => { window.location.href = data.checkoutUrl; }, 600);
+      } else if (data.error === "already_claimed") {
+        setAlreadyClaimedMessage(data.message || "You've already claimed this drop.");
+        setClaimedForPhone(phone ?? "");
+        setError("");
+        setLoading(false);
       } else {
         setError(data.error || "Could not start checkout.");
         setLoading(false);
@@ -103,13 +125,17 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
   };
 
   const total = (item.price * quantity).toFixed(2);
+  const alreadyClaimed = !!alreadyClaimedMessage;
+  const ctaDisabled = disabled || alreadyClaimed;
   const ctaText = loading
     ? "Redirecting..."
-    : disabled
-      ? (sold ? "Sold Out" : ended ? "Ended" : pickupActive ? "Closed" : cancelled ? "Cancelled" : "Unavailable")
-      : quantity === 1
-        ? `Claim for $${total}`
-        : `Claim ${quantity} Spots for $${total}`;
+    : alreadyClaimed
+      ? "Already claimed"
+      : disabled
+        ? (sold ? "Sold Out" : ended ? "Ended" : pickupActive ? "Closed" : cancelled ? "Cancelled" : "Unavailable")
+        : quantity === 1
+          ? `Claim for $${total}`
+          : `Claim ${quantity} Spots for $${total}`;
 
   return (
     <div style={{
@@ -204,6 +230,46 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           </div>
         )}
 
+        {alreadyClaimedMessage && (
+          <div
+            data-testid="already-claimed-banner"
+            style={{
+              background: "#F3F4F6",
+              border: "1px solid #E5E7EB",
+              borderRadius: "14px",
+              padding: "18px 20px",
+              textAlign: "center",
+              color: "#111827",
+              fontSize: "16px",
+              lineHeight: 1.45,
+              whiteSpace: "pre-line",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "28px",
+                height: "28px",
+                borderRadius: "9999px",
+                background: "#DCFCE7",
+                color: T.green,
+                fontSize: "16px",
+                fontWeight: 800,
+              }}
+            >
+              ✓
+            </span>
+            {alreadyClaimedMessage}
+          </div>
+        )}
+
         {/* ── Quantity selector — hidden when sold-out ── */}
         {!sold && !disabled && (
           <div
@@ -262,21 +328,21 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
         )}
 
         <button
-          onClick={!disabled && !loading ? handleClaim : undefined}
-          disabled={disabled || loading}
+          onClick={!ctaDisabled && !loading ? handleClaim : undefined}
+          disabled={ctaDisabled || loading}
           style={{
             width: "100%",
             minHeight: 54,
             border: "none",
             borderRadius: "14px",
-            background: disabled ? "rgba(255,255,255,0.08)" : T.red,
-            color: disabled ? "rgba(255,255,255,0.4)" : "#fff",
+            background: ctaDisabled ? "rgba(255,255,255,0.08)" : T.red,
+            color: ctaDisabled ? "rgba(255,255,255,0.4)" : "#fff",
             fontFamily: T.display,
             fontWeight: 700,
             fontSize: "17px",
-            cursor: disabled || loading ? "default" : "pointer",
+            cursor: ctaDisabled || loading ? "default" : "pointer",
             transition: "all 150ms ease",
-            boxShadow: disabled ? "none" : "0 4px 20px rgba(249,58,37,0.4)",
+            boxShadow: ctaDisabled ? "none" : "0 4px 20px rgba(249,58,37,0.4)",
             flexShrink: 0,
           }}
         >

@@ -551,9 +551,13 @@ async function testCheckout() {
 
   if (!infra.checkout) {
     skip("Checkout: valid request", "/api/checkout not available");
-    skip("Checkout: duplicate purchase", "/api/checkout not available");
+    skip("Checkout: duplicate purchase (paid, qty=1)", "/api/checkout not available");
+    skip("Checkout: duplicate purchase (paid, qty=3)", "/api/checkout not available");
+    skip("Checkout: pending order blocks retry", "/api/checkout not available");
     return;
   }
+
+  const supabase = getSupabase();
 
   // A. Valid checkout → returns URL
   try {
@@ -570,7 +574,7 @@ async function testCheckout() {
 
     if (res.status === 200 && data.checkoutUrl) {
       pass("Checkout: valid request → returns checkoutUrl");
-    } else if (res.status === 409 && data.error?.includes("already claimed")) {
+    } else if (res.status === 409 && data.error === "already_claimed") {
       pass("Checkout: valid request → duplicate detected (existing order)");
     } else if (res.status === 400) {
       pass("Checkout: valid request → " + (data.error || "rejected").substring(0, 60));
@@ -581,13 +585,49 @@ async function testCheckout() {
     fail("Checkout: valid request", err.message);
   }
 
-  // B. Duplicate check — seed order then try again
-  const supabase = getSupabase();
-  const dupSid = testId();
-  const dupPhone = "+10000000001";
+  // Shared helper: assert 409 shape + existingQuantity.
+  const assertAlreadyClaimed = async (label, phone, dropId, expectedQty) => {
+    try {
+      const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, drop_item_id: dropId, quantity: 1 }),
+      });
+      const data = await res.json();
+      if (res.status !== 409) {
+        fail(label, `Expected 409, got ${res.status}: ${data.error || "no error"}`);
+        return;
+      }
+      if (data.error !== "already_claimed") {
+        fail(label, `Expected error="already_claimed", got "${data.error}"`);
+        return;
+      }
+      if (typeof data.message !== "string" || data.message.length === 0) {
+        fail(label, `Expected non-empty message, got: ${JSON.stringify(data.message)}`);
+        return;
+      }
+      if (typeof data.dropTitle !== "string" || data.dropTitle.length === 0) {
+        fail(label, `Expected dropTitle string, got: ${JSON.stringify(data.dropTitle)}`);
+        return;
+      }
+      if (data.existingQuantity !== expectedQty) {
+        fail(label, `Expected existingQuantity=${expectedQty}, got ${data.existingQuantity}`);
+        return;
+      }
+      pass(label);
+    } catch (err) {
+      fail(label, err.message);
+    }
+  };
+
+  // B. Duplicate: one paid order, quantity=1 → existingQuantity must be 1.
+  const dupPhone1 = "+10000000001";
+  // Clean any prior state so seed is deterministic (the (phone, drop) unique
+  // index otherwise rejects the seed for a re-run).
+  await supabase.from("orders").delete().eq("phone", dupPhone1).eq("drop_item_id", "drop-tandoori-apr09");
   await supabase.rpc("create_order_atomic", {
-    p_stripe_session_id: dupSid,
-    p_phone: dupPhone,
+    p_stripe_session_id: testId(),
+    p_phone: dupPhone1,
     p_drop_item_id: "drop-tandoori-apr09",
     p_drop_title: "Tandoori Special",
     p_restaurant_name: "Tikka Grill",
@@ -596,25 +636,70 @@ async function testCheckout() {
     p_qr_token: testId(),
     p_total_spots: 6,
   });
+  await assertAlreadyClaimed(
+    "Checkout: duplicate purchase (paid, qty=1) → existingQuantity=1",
+    dupPhone1,
+    "drop-tandoori-apr09",
+    1,
+  );
 
-  try {
-    const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phone: dupPhone,
-        drop_item_id: "drop-tandoori-apr09",
-        quantity: 1,
-      }),
-    });
-    const data = await res.json();
-    if (res.status === 409 && data.error?.includes("already claimed")) {
-      pass("Checkout: duplicate purchase → blocked");
-    } else {
-      fail("Checkout: duplicate purchase", `Expected 409, got ${res.status}: ${data.error || "no error"}`);
-    }
-  } catch (err) {
-    fail("Checkout: duplicate purchase", err.message);
+  // C. Duplicate: one paid order, quantity=3 → existingQuantity must be 3.
+  const dupPhone3 = "+10000000003";
+  await supabase.from("orders").delete().eq("phone", dupPhone3).eq("drop_item_id", "drop-pizza-combo-apr10");
+  await supabase.rpc("create_order_atomic", {
+    p_stripe_session_id: testId(),
+    p_phone: dupPhone3,
+    p_drop_item_id: "drop-pizza-combo-apr10",
+    p_drop_title: "Pizza Combo Deal",
+    p_restaurant_name: "Napoli Fire",
+    p_price_paid: 44.97,
+    p_quantity: 3,
+    p_qr_token: testId(),
+    p_total_spots: 20,
+  });
+  await assertAlreadyClaimed(
+    "Checkout: duplicate purchase (paid, qty=3) → existingQuantity=3",
+    dupPhone3,
+    "drop-pizza-combo-apr10",
+    3,
+  );
+
+  // NOTE: "multiple paid orders summed" cannot be tested here — the
+  // uq_phone_drop_item unique index guarantees at most one row per
+  // (phone, drop_item_id). The SUM logic in the API is defense-in-depth
+  // in case that index is ever relaxed; single-row cases B and C above
+  // exercise the SUM path.
+
+  // D. Pending order blocks retry → 409 with existingQuantity=0.
+  const pendingPhone = "+10000000099";
+  const pendingDrop = "drop-bbq-plate-apr11";
+  await supabase.from("orders").delete().eq("phone", pendingPhone).eq("drop_item_id", pendingDrop);
+  // Insert a pending row directly (RPC sets status=paid on success, so
+  // go through the table to simulate a stuck/abandoned checkout).
+  const { error: pendingErr } = await supabase.from("orders").insert({
+    stripe_session_id: testId(),
+    phone: pendingPhone,
+    drop_item_id: pendingDrop,
+    drop_title: "BBQ Plate Drop",
+    restaurant_name: "Smokey's BBQ",
+    price_paid: 16.99,
+    quantity: 1,
+    qr_token: testId(),
+    status: "pending",
+    redemption_status: "pending",
+  });
+  if (pendingErr) {
+    fail(
+      "Checkout: pending order blocks retry",
+      `seed failed: ${pendingErr.message}`,
+    );
+  } else {
+    await assertAlreadyClaimed(
+      "Checkout: pending order blocks retry → existingQuantity=0",
+      pendingPhone,
+      pendingDrop,
+      0,
+    );
   }
 }
 
