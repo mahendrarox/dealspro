@@ -109,6 +109,9 @@ export default function ScanPage() {
   const [redeeming, setRedeeming] = useState(false);
   const [redeemError, setRedeemError] = useState("");
   const [redeemed, setRedeemed] = useState(false);
+  // Session-scoped: true only when THIS session just performed the
+  // redemption. Distinguishes "success just now" from "historical".
+  const [justRedeemed, setJustRedeemed] = useState(false);
 
   // Phone-search results (when input is a 10-digit phone)
   const [phoneResults, setPhoneResults] = useState<Order[]>([]);
@@ -241,6 +244,7 @@ export default function ScanPage() {
     setOrder(null);
     setDropItem(null);
     setRedeemed(false);
+    setJustRedeemed(false);
     setRedeemError("");
     setPhoneResults([]);
 
@@ -308,6 +312,10 @@ export default function ScanPage() {
     if (!order) return;
     setRedeeming(true);
     setRedeemError("");
+    // Capture pre-call state for the just-now guard. If the order was
+    // already redeemed before this click (race / double-tap), we must
+    // not flip justRedeemed — that banner belongs to a fresh success.
+    const wasRedeemedBeforeCall = redeemed;
 
     try {
       const res = await fetch("/api/redeem", {
@@ -321,6 +329,7 @@ export default function ScanPage() {
       } else {
         setOrder(data.order);
         setRedeemed(true);
+        if (!wasRedeemedBeforeCall) setJustRedeemed(true);
       }
     } catch {
       setRedeemError("Network error. Please try again.");
@@ -330,6 +339,10 @@ export default function ScanPage() {
 
   const redeemFromPhone = async (phoneOrder: Order) => {
     setPhoneRedeeming(phoneOrder.qr_token);
+    // Phone-results rows are always unredeemed (the API only returns
+    // pending orders), so captured `redeemed` here is effectively false.
+    // Still guard for consistency with confirmRedeem's contract.
+    const wasRedeemedBeforeCall = redeemed;
     try {
       const res = await fetch("/api/redeem", {
         method: "POST",
@@ -341,6 +354,7 @@ export default function ScanPage() {
         // After redeeming, show the full order card in its redeemed state.
         setOrder(data.order || phoneOrder);
         setRedeemed(true);
+        if (!wasRedeemedBeforeCall) setJustRedeemed(true);
         setPhoneResults([]);
       } else {
         setError(data.error || "Redemption failed");
@@ -356,6 +370,7 @@ export default function ScanPage() {
     setOrder(null);
     setDropItem(null);
     setRedeemed(false);
+    setJustRedeemed(false);
     setRedeemError("");
     setError("");
     setPhoneResults([]);
@@ -712,6 +727,7 @@ export default function ScanPage() {
             order={order}
             dropItem={dropItem}
             redeemed={redeemed}
+            justRedeemed={justRedeemed}
             redeeming={redeeming}
             redeemError={redeemError}
             onRedeem={confirmRedeem}
@@ -729,6 +745,7 @@ interface OrderCardProps {
   order: Order;
   dropItem: DropItem | null;
   redeemed: boolean;
+  justRedeemed: boolean;
   redeeming: boolean;
   redeemError: string;
   onRedeem: () => void;
@@ -739,6 +756,7 @@ function OrderCard({
   order,
   dropItem,
   redeemed,
+  justRedeemed,
   redeeming,
   redeemError,
   onRedeem,
@@ -927,31 +945,67 @@ function OrderCard({
 
         {status === "redeemed" && (
           <>
-            <div
-              style={{
-                width: "100%",
-                padding: "14px 16px",
-                background: "rgba(239,68,68,0.1)",
-                border: "1px solid rgba(239,68,68,0.25)",
-                borderRadius: "12px",
-                color: "#FECACA",
-                fontWeight: 600,
-                fontSize: "14px",
-                textAlign: "center",
-                boxSizing: "border-box",
-              }}
-            >
-              Already redeemed
-              {order.redeemed_at
-                ? ` on ${new Date(order.redeemed_at).toLocaleString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}`
-                : ""}
-              .
-            </div>
+            {justRedeemed ? (
+              <div
+                style={{
+                  width: "100%",
+                  padding: "14px 16px",
+                  background: "rgba(22, 163, 74, 0.15)",
+                  border: "1px solid rgba(22, 163, 74, 0.4)",
+                  borderRadius: "10px",
+                  color: "#86EFAC",
+                  fontWeight: 600,
+                  fontSize: "14px",
+                  textAlign: "center",
+                  boxSizing: "border-box",
+                }}
+              >
+                ✓ Redeemed just now
+                {order.redeemed_at && (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 400,
+                      marginTop: "4px",
+                      opacity: 0.85,
+                    }}
+                  >
+                    {new Date(order.redeemed_at).toLocaleString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  padding: "14px 16px",
+                  background: "rgba(239,68,68,0.1)",
+                  border: "1px solid rgba(239,68,68,0.25)",
+                  borderRadius: "12px",
+                  color: "#FECACA",
+                  fontWeight: 600,
+                  fontSize: "14px",
+                  textAlign: "center",
+                  boxSizing: "border-box",
+                }}
+              >
+                Already redeemed
+                {order.redeemed_at
+                  ? ` on ${new Date(order.redeemed_at).toLocaleString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}`
+                  : ""}
+                .
+              </div>
+            )}
             <button
               onClick={onScanAnother}
               style={{
