@@ -157,9 +157,21 @@ export default function ScanPage() {
       if (!scannerRef.current) {
         scannerRef.current = new Html5Qrcode(scannerElementId);
       }
+      // Explicit ideal dimensions so iOS Safari picks a sane stream size
+      // (without this the video element sometimes lays out 0×0 → black).
+      const viewportWidth = Math.min(window.innerWidth - 40, 400);
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        videoConstraints: {
+          facingMode: "environment",
+          width: { ideal: viewportWidth },
+          height: { ideal: viewportWidth },
+        },
+      };
       await scannerRef.current.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
+        config,
         async (decodedText) => {
           // Guard against multiple detections queued between .stop() call
           // and the stream actually ending.
@@ -180,6 +192,30 @@ export default function ScanPage() {
           // Silence them to avoid flooding the console.
         },
       );
+
+      // iOS Safari requires playsinline + muted on the video element to
+      // actually render the stream (otherwise it stays black or tries to
+      // go fullscreen). html5-qrcode injects the <video> asynchronously,
+      // so poll briefly until it exists, then set the attributes.
+      let attempts = 0;
+      const maxAttempts = 10;
+      const applyVideoFix = () => {
+        const videoEl = document.querySelector<HTMLVideoElement>(
+          `#${scannerElementId} video`,
+        );
+        if (videoEl) {
+          videoEl.setAttribute("playsinline", "true");
+          videoEl.setAttribute("autoplay", "true");
+          videoEl.muted = true;
+          return;
+        }
+        if (attempts < maxAttempts) {
+          attempts++;
+          setTimeout(applyVideoFix, 100);
+        }
+      };
+      applyVideoFix();
+
       setScannerState("active");
     } catch (err) {
       console.error("[scan] camera error:", err);

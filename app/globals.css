@@ -23,3 +23,18 @@ input { font-family: inherit; }
 @media (max-width: 480px) {
   .footer-grid { grid-template-columns: 1fr !important; }
 }
+
+/* Scan page viewfinder — html5-qrcode injects its own <video> into
+   #scan-region. iOS Safari needs explicit dimensions + display:block on
+   that video or the stream lays out 0×0 and the frame renders black. */
+#scan-region {
+  width: 100%;
+  min-height: 300px;
+  position: relative;
+}
+#scan-region video {
+  width: 100% !important;
+  height: auto !important;
+  display: block !important;
+  object-fit: cover;
+}
