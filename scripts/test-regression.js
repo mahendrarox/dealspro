@@ -1364,6 +1364,7 @@ async function main() {
     await testPhoneCapture();
     await testPhoneSearch();
     await testDropEdgeCases();
+    await testTimeHelpers();
     await testAdminUnauthenticated();
     await testAdminWrongEmail();
     await testZodInvalidInput();
@@ -1881,6 +1882,129 @@ async function insertTestDrop(overrides = {}) {
 async function deleteTestDrop(id) {
   const supabase = getSupabase();
   await supabase.from("drop_items").delete().eq("id", id);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 17b: Time Helpers — ISO-instant comparisons + formatTimeWindow
+// Mirrors lib/drops/helpers.ts so the runner stays pure Node.
+// ═══════════════════════════════════════════════════════════════════════
+async function testTimeHelpers() {
+  console.log("\n── Test 17b: Time Helpers ──");
+
+  // Pure JS copies of the updated lib/drops/helpers.ts logic. If the
+  // real implementation drifts from this, these tests go stale —
+  // treat this block as a contract pin.
+  function canPurchase(item, now) {
+    if (item.status === "cancelled") return false;
+    const start = new Date(item.start_time_iso).getTime();
+    return now < start;
+  }
+  function isPickupInProgress(item, now) {
+    const start = new Date(item.start_time_iso).getTime();
+    const end = new Date(item.end_time_iso).getTime();
+    return now >= start && now < end;
+  }
+  function hasEnded(item, now) {
+    const end = new Date(item.end_time_iso).getTime();
+    return now >= end;
+  }
+  function formatTimeWindow(item) {
+    const fmt = (t) => {
+      const [h] = t.split(":").map(Number);
+      const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      const ampm = h >= 12 ? "PM" : "AM";
+      return { hour12, ampm };
+    };
+    const s = fmt(item.start_time);
+    const e = fmt(item.end_time);
+    return s.ampm === e.ampm
+      ? `${s.hour12}–${e.hour12} ${e.ampm}`
+      : `${s.hour12} ${s.ampm}–${e.hour12} ${e.ampm}`;
+  }
+
+  // The midnight-straddling drop from the diagnosis.
+  const crosses = {
+    id: "tz-crosses-midnight",
+    status: "live",
+    start_time_iso: "2026-04-22T23:00:00Z",
+    end_time_iso: "2026-04-23T00:00:00Z",
+    // Intentionally WRONG display fields — the old code-path would
+    // use these. The new helpers must ignore them.
+    date: "2026-04-22",
+    start_time: "23:00",
+    end_time: "00:00",
+  };
+
+  // 1) hasEnded=false when current time is before end_time (the exact
+  //    reported bug).
+  {
+    const now = new Date("2026-04-22T05:50:00Z").getTime();
+    if (!hasEnded(crosses, now)) {
+      pass("TZ: midnight-straddling drop not ended when now < end_time_iso");
+    } else {
+      fail("TZ: midnight-straddling drop not ended when now < end_time_iso", "hasEnded returned true");
+    }
+  }
+
+  // 2) canPurchase=true and isPickupInProgress=false when now is before start.
+  {
+    const now = new Date("2026-04-22T05:50:00Z").getTime();
+    const cp = canPurchase(crosses, now);
+    const pip = isPickupInProgress(crosses, now);
+    if (cp && !pip) {
+      pass("TZ: before start → canPurchase=true, isPickupInProgress=false");
+    } else {
+      fail("TZ: before start", `canPurchase=${cp}, isPickupInProgress=${pip}`);
+    }
+  }
+
+  // 3) formatTimeWindow: hour 0 → "12 AM" (the bug was "0 AM");
+  //    hour 12 → "12 PM". The shared-AM/PM format elides the first
+  //    period when both endpoints are in the same half.
+  {
+    const midnight = formatTimeWindow({ start_time: "00:00", end_time: "01:00" });
+    const noon = formatTimeWindow({ start_time: "11:00", end_time: "12:00" });
+    const midSpan = formatTimeWindow({ start_time: "23:00", end_time: "00:00" });
+    if (midnight === "12–1 AM") {
+      pass("TZ: formatTimeWindow hour 0 renders as 12 (AM)");
+    } else {
+      fail("TZ: formatTimeWindow hour 0", `got "${midnight}", expected "12–1 AM"`);
+    }
+    if (noon === "11 AM–12 PM") {
+      pass("TZ: formatTimeWindow hour 12 renders as 12 PM");
+    } else {
+      fail("TZ: formatTimeWindow hour 12", `got "${noon}", expected "11 AM–12 PM"`);
+    }
+    if (midSpan === "11 PM–12 AM") {
+      pass("TZ: formatTimeWindow midnight crossover → 11 PM–12 AM (not '0 AM')");
+    } else {
+      fail("TZ: formatTimeWindow midnight crossover", `got "${midSpan}", expected "11 PM–12 AM"`);
+    }
+  }
+
+  // 4) End-to-end midnight-straddle scenarios keyed off pure UTC instants.
+  //    Using ISO timestamps so the test isn't sensitive to the runner's
+  //    local timezone.
+  {
+    const before = new Date("2026-04-22T22:00:00Z").getTime();
+    if (!hasEnded(crosses, before) && !isPickupInProgress(crosses, before)) {
+      pass("TZ: at 22:00Z — hasEnded=false, isPickupInProgress=false");
+    } else {
+      fail("TZ: at 22:00Z", `hasEnded=${hasEnded(crosses, before)}, pip=${isPickupInProgress(crosses, before)}`);
+    }
+    const during = new Date("2026-04-22T23:30:00Z").getTime();
+    if (!hasEnded(crosses, during) && isPickupInProgress(crosses, during)) {
+      pass("TZ: at 23:30Z — hasEnded=false, isPickupInProgress=true");
+    } else {
+      fail("TZ: at 23:30Z", `hasEnded=${hasEnded(crosses, during)}, pip=${isPickupInProgress(crosses, during)}`);
+    }
+    const after = new Date("2026-04-23T00:01:00Z").getTime();
+    if (hasEnded(crosses, after) && !isPickupInProgress(crosses, after)) {
+      pass("TZ: at 00:01Z next day — hasEnded=true, isPickupInProgress=false");
+    } else {
+      fail("TZ: at 00:01Z next day", `hasEnded=${hasEnded(crosses, after)}, pip=${isPickupInProgress(crosses, after)}`);
+    }
+  }
 }
 
 // ── Test 18: admin unauthenticated redirects to login ──
