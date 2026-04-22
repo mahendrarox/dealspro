@@ -16,6 +16,13 @@ export interface DropItem {
   date: string; // "YYYY-MM-DD"
   start_time: string; // "HH:MM" 24h
   end_time: string; // "HH:MM" 24h
+  /**
+   * start_time_iso and end_time_iso are the ONLY source of truth for time comparisons.
+   * date, start_time, and end_time (string fields) are display-only.
+   * NEVER use the string fields for logic — they can be incorrect for drops spanning midnight.
+   */
+  start_time_iso: string; // full UTC ISO-8601 string from drop_items.start_time
+  end_time_iso: string;   // full UTC ISO-8601 string from drop_items.end_time
   price: number; // decimal dollars (e.g. 9.99)
   original_price: number;
   total_spots: number;

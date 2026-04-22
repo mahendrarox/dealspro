@@ -60,6 +60,9 @@ function dbRowToDropItem(row: DbDropRow): DropItem {
     date: dateStr,
     start_time: startTimeStr,
     end_time: endTimeStr,
+    // Authoritative UTC instants — never derived, never reshaped.
+    start_time_iso: new Date(row.start_time).toISOString(),
+    end_time_iso: new Date(row.end_time).toISOString(),
     price: Number(row.price),
     original_price: row.original_price === null ? 0 : Number(row.original_price),
     total_spots: row.total_spots,

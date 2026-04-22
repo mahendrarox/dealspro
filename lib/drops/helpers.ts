@@ -8,27 +8,34 @@
 import type { DropItem } from "./types";
 
 // ─── Time Helpers ─────────────────────────────────────────────────────
+//
+// All comparisons below use the authoritative UTC instants
+// `start_time_iso` / `end_time_iso`. The string fields `date`,
+// `start_time`, `end_time` are display-only and MUST NOT be used for
+// logic — they are server-local wall-clock projections that silently
+// lose the end date when a drop spans midnight.
 
-/** Build a Date from item.date + a time string like "17:00" */
-function toDate(dateStr: string, timeStr: string): Date {
-  return new Date(`${dateStr}T${timeStr}:00`);
-}
-
-/** True if current time is before the item's start_time on its date and item is not cancelled */
+/** True if current time is before the drop's start and it isn't cancelled. */
 export function canPurchase(item: DropItem): boolean {
   if (item.status === "cancelled") return false;
-  return new Date() < toDate(item.date, item.start_time);
+  const now = Date.now();
+  const start = new Date(item.start_time_iso).getTime();
+  return now < start;
 }
 
-/** True if current time is between start_time and end_time on the item's date */
+/** True if current time is within the pickup window [start, end). */
 export function isPickupInProgress(item: DropItem): boolean {
-  const now = new Date();
-  return now >= toDate(item.date, item.start_time) && now < toDate(item.date, item.end_time);
+  const now = Date.now();
+  const start = new Date(item.start_time_iso).getTime();
+  const end = new Date(item.end_time_iso).getTime();
+  return now >= start && now < end;
 }
 
-/** True if current time is past the item's end_time */
+/** True if current time is at or past the drop's end. */
 export function hasEnded(item: DropItem): boolean {
-  return new Date() >= toDate(item.date, item.end_time);
+  const now = Date.now();
+  const end = new Date(item.end_time_iso).getTime();
+  return now >= end;
 }
 
 /** True if the QR / deal card is still valid for redemption */
@@ -40,7 +47,8 @@ export function isRedemptionValid(item: DropItem): boolean {
 export function formatTimeWindow(item: DropItem): string {
   const fmt = (t: string) => {
     const [h] = t.split(":").map(Number);
-    const hour12 = h > 12 ? h - 12 : h;
+    // Standard 12-hour clock: 0 → 12 AM (midnight), 12 → 12 PM (noon).
+    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
     const ampm = h >= 12 ? "PM" : "AM";
     return { hour12, ampm };
   };
