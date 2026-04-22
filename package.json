@@ -16,6 +16,7 @@
     "@googlemaps/js-api-loader": "^2.0.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.99.2",
+    "html5-qrcode": "^2.3.8",
     "jose": "^6.2.2",
     "next": "16.1.6",
     "qrcode": "^1.5.4",

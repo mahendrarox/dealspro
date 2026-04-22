@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Html5Qrcode } from "html5-qrcode";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -30,17 +31,6 @@ type Order = {
   redeemed_at?: string;
   phone?: string | null;
 };
-
-// ─── Minimal BarcodeDetector type (browsers that support it) ─────────
-
-type DetectedBarcode = { rawValue: string };
-interface BarcodeDetectorLike {
-  detect: (source: CanvasImageSource) => Promise<DetectedBarcode[]>;
-}
-interface BarcodeDetectorCtor {
-  new (opts?: { formats?: string[] }): BarcodeDetectorLike;
-  getSupportedFormats?: () => Promise<string[]>;
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -125,105 +115,88 @@ export default function ScanPage() {
   const [phoneRedeeming, setPhoneRedeeming] = useState<string | null>(null);
 
   // Camera / scanner
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const scanLoopRef = useRef<number | null>(null);
-  const detectorRef = useRef<BarcodeDetectorLike | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isProcessingRef = useRef(false);
+  const scannerElementId = "scan-region";
   const [scannerState, setScannerState] = useState<
-    "idle" | "starting" | "active" | "denied" | "unsupported"
+    "idle" | "starting" | "active" | "denied"
   >("idle");
   const [scannerError, setScannerError] = useState("");
 
-  // Detect BarcodeDetector availability on mount
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const ctor = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor })
-      .BarcodeDetector;
-    if (!ctor) {
-      setScannerState("unsupported");
-      return;
-    }
-    try {
-      detectorRef.current = new ctor({ formats: ["qr_code"] });
-    } catch {
-      setScannerState("unsupported");
-    }
-  }, []);
-
   // Clean up camera on unmount
   useEffect(() => {
-    return () => stopScanner();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {});
+        scannerRef.current.clear();
+      }
+    };
   }, []);
 
-  const stopScanner = () => {
-    if (scanLoopRef.current !== null) {
-      cancelAnimationFrame(scanLoopRef.current);
-      scanLoopRef.current = null;
+  const stopScanner = async () => {
+    if (!scannerRef.current) return;
+    try {
+      await scannerRef.current.stop();
+    } catch {
+      // already stopped or never started
     }
-    if (streamRef.current) {
-      for (const track of streamRef.current.getTracks()) track.stop();
-      streamRef.current = null;
+    try {
+      scannerRef.current.clear();
+    } catch {
+      // ignore
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+    scannerRef.current = null;
   };
 
   const startScanner = async () => {
-    if (scannerState === "unsupported") return;
     setScannerError("");
     setScannerState("starting");
+    isProcessingRef.current = false;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      if (!scannerRef.current) {
+        scannerRef.current = new Html5Qrcode(scannerElementId);
       }
+      await scannerRef.current.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        async (decodedText) => {
+          // Guard against multiple detections queued between .stop() call
+          // and the stream actually ending.
+          if (isProcessingRef.current) return;
+          isProcessingRef.current = true;
+
+          await stopScanner();
+          setScannerState("idle");
+
+          const token = extractToken(decodedText);
+          if (token) {
+            setInput(token);
+            await lookupToken(token);
+          }
+        },
+        () => {
+          // Per-frame scan failures — expected while the frame settles.
+          // Silence them to avoid flooding the console.
+        },
+      );
       setScannerState("active");
-      scanLoop();
     } catch (err) {
       console.error("[scan] camera error:", err);
-      const msg = err instanceof Error ? err.message : "Camera access failed";
-      setScannerError(msg);
+      const raw =
+        err instanceof Error ? err.message : String(err ?? "Camera access failed");
+      setScannerError(raw);
       setScannerState("denied");
-    }
-  };
-
-  const scanLoop = () => {
-    const video = videoRef.current;
-    const detector = detectorRef.current;
-    if (!video || !detector) return;
-
-    const tick = async () => {
-      if (!videoRef.current || !streamRef.current) return;
-      if (video.readyState >= 2 && video.videoWidth > 0) {
+      // Release any partial scanner instance so the next retry starts clean.
+      if (scannerRef.current) {
         try {
-          const codes = await detector.detect(video);
-          if (codes.length > 0) {
-            const raw = codes[0].rawValue;
-            const token = extractToken(raw);
-            if (token) {
-              stopScanner();
-              setScannerState("idle");
-              setInput(token);
-              await lookupToken(token);
-              return;
-            }
-          }
+          scannerRef.current.clear();
         } catch {
-          // Detector can throw intermittently while the frame is still settling — keep scanning.
+          // ignore
         }
+        scannerRef.current = null;
       }
-      scanLoopRef.current = requestAnimationFrame(tick);
-    };
-
-    scanLoopRef.current = requestAnimationFrame(tick);
+    }
   };
 
   const lookupToken = async (token: string) => {
@@ -410,14 +383,11 @@ export default function ScanPage() {
             marginBottom: "16px",
           }}
         >
-          <video
-            ref={videoRef}
-            playsInline
-            muted
+          <div
+            id={scannerElementId}
             style={{
               width: "100%",
               height: "100%",
-              objectFit: "cover",
               display: scannerState === "active" ? "block" : "none",
               background: "#000",
             }}
@@ -462,46 +432,35 @@ export default function ScanPage() {
               <div
                 style={{ color: "#E4E4E7", fontSize: "15px", fontWeight: 600 }}
               >
-                {scannerState === "unsupported"
-                  ? "Camera scanning isn't available on this browser"
-                  : scannerState === "denied"
-                    ? "Camera permission is required"
-                    : scannerState === "starting"
-                      ? "Starting camera…"
-                      : "Ready to scan QR codes"}
+                {scannerState === "denied"
+                  ? "Camera access denied — use manual entry below"
+                  : scannerState === "starting"
+                    ? "Starting camera…"
+                    : "Ready to scan QR codes"}
               </div>
               {scannerError && (
                 <div style={{ color: "#F93A25", fontSize: "12px" }}>
                   {scannerError}
                 </div>
               )}
-              {scannerState !== "unsupported" && (
-                <button
-                  onClick={startScanner}
-                  disabled={scannerState === "starting"}
-                  style={{
-                    padding: "12px 24px",
-                    background: "#F93A25",
-                    border: "none",
-                    borderRadius: "12px",
-                    color: "#FFFFFF",
-                    fontFamily: "'DM Sans', sans-serif",
-                    fontWeight: 700,
-                    fontSize: "15px",
-                    cursor: scannerState === "starting" ? "default" : "pointer",
-                    opacity: scannerState === "starting" ? 0.7 : 1,
-                  }}
-                >
-                  {scannerState === "denied"
-                    ? "Try again"
-                    : "Start scanning"}
-                </button>
-              )}
-              {scannerState === "unsupported" && (
-                <div style={{ color: "#71717A", fontSize: "12px" }}>
-                  Use the manual entry below instead.
-                </div>
-              )}
+              <button
+                onClick={startScanner}
+                disabled={scannerState === "starting"}
+                style={{
+                  padding: "12px 24px",
+                  background: "#F93A25",
+                  border: "none",
+                  borderRadius: "12px",
+                  color: "#FFFFFF",
+                  fontFamily: "'DM Sans', sans-serif",
+                  fontWeight: 700,
+                  fontSize: "15px",
+                  cursor: scannerState === "starting" ? "default" : "pointer",
+                  opacity: scannerState === "starting" ? 0.7 : 1,
+                }}
+              >
+                {scannerState === "denied" ? "Try again" : "Start scanning"}
+              </button>
             </div>
           )}
 
