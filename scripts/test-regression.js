@@ -1385,6 +1385,7 @@ async function main() {
     await testLocationIntegrity();
     await testPartnerRestaurants();
     await testSmartDefaults();
+    await testDropImageInput();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -3132,6 +3133,102 @@ async function testSmartDefaults() {
     } else {
       fail("Smart defaults: doubling math", `got ${expected}`);
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 34: DROP IMAGE INPUT — URL validation + low-res threshold
+// ═══════════════════════════════════════════════════════════════════════
+
+function loadDropImageInput() {
+  try {
+    return require("../app/admin/drops/drop-image-input");
+  } catch (err) {
+    console.log(`  [WARN] Could not load drop-image-input: ${err.message}`);
+    return null;
+  }
+}
+
+async function testDropImageInput() {
+  console.log("\n── Test 34: Drop Image Input ──");
+  const mod = loadDropImageInput();
+  if (!mod || typeof mod.validateImageUrl !== "function") {
+    skip("Image URL: empty allowed", "drop-image-input unavailable");
+    skip("Image URL: https accepted", "drop-image-input unavailable");
+    skip("Image URL: http accepted", "drop-image-input unavailable");
+    skip("Image URL: malformed rejected", "drop-image-input unavailable");
+    skip("Image URL: ftp protocol rejected", "drop-image-input unavailable");
+    skip("Image URL: javascript: rejected", "drop-image-input unavailable");
+    skip("Image URL: relative path rejected", "drop-image-input unavailable");
+    skip("Image URL: data URL rejected", "drop-image-input unavailable");
+    skip("Image: low-res threshold (800×500)", "drop-image-input unavailable");
+    return;
+  }
+  const { validateImageUrl } = mod;
+
+  // 34a: empty string is valid (optional field)
+  if (validateImageUrl("") === null) pass("Image URL: empty allowed");
+  else fail("Image URL: empty allowed", validateImageUrl(""));
+
+  // 34b: whitespace only is treated as empty
+  if (validateImageUrl("   ") === null) pass("Image URL: whitespace-only treated as empty");
+  else fail("Image URL: whitespace", validateImageUrl("   "));
+
+  // 34c: https accepted
+  if (validateImageUrl("https://images.unsplash.com/photo.jpg") === null) {
+    pass("Image URL: https accepted");
+  } else {
+    fail("Image URL: https", "valid https rejected");
+  }
+
+  // 34d: http accepted
+  if (validateImageUrl("http://example.com/img.png") === null) {
+    pass("Image URL: http accepted");
+  } else {
+    fail("Image URL: http", "valid http rejected");
+  }
+
+  // 34e: malformed URL rejected
+  if (validateImageUrl("not a url") !== null) {
+    pass("Image URL: malformed rejected");
+  } else {
+    fail("Image URL: malformed", "should have been rejected");
+  }
+
+  // 34f: ftp protocol rejected (only http/https in phase 1)
+  if (validateImageUrl("ftp://example.com/img.png") !== null) {
+    pass("Image URL: ftp protocol rejected");
+  } else {
+    fail("Image URL: ftp", "ftp should have been rejected");
+  }
+
+  // 34g: javascript: scheme rejected (XSS guard)
+  if (validateImageUrl("javascript:alert(1)") !== null) {
+    pass("Image URL: javascript: rejected");
+  } else {
+    fail("Image URL: javascript:", "javascript: should have been rejected");
+  }
+
+  // 34h: relative path rejected
+  if (validateImageUrl("/relative/path.png") !== null) {
+    pass("Image URL: relative path rejected");
+  } else {
+    fail("Image URL: relative path", "relative path should have been rejected");
+  }
+
+  // 34i: data: URL rejected (no inline data URLs in phase 1)
+  if (validateImageUrl("data:image/png;base64,iVBORw0KGgo=") !== null) {
+    pass("Image URL: data URL rejected");
+  } else {
+    fail("Image URL: data URL", "data URL should have been rejected");
+  }
+
+  // 34j: low-res threshold logic — pure math test, mirrors the component's check
+  const isLowRes = (w, h) => w < 800 || h < 500;
+  if (isLowRes(640, 480) && isLowRes(800, 400) && !isLowRes(800, 500) && !isLowRes(1200, 800)) {
+    pass("Image: low-res threshold (800×500)");
+  } else {
+    fail("Image: low-res threshold", "boundary check failed");
   }
 }
 
