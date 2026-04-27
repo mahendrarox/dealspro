@@ -4,7 +4,10 @@ export type AdminAction =
   | "create_drop"
   | "update_drop"
   | "toggle_active"
-  | "toggle_hero";
+  | "toggle_hero"
+  | "create_restaurant"
+  | "update_restaurant"
+  | "toggle_restaurant_active";
 
 /**
  * Append an admin log row. Fails silently so a logging error does not
