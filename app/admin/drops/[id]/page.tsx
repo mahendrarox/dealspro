@@ -1,34 +1,15 @@
 import { requireAdmin } from "@/lib/admin/auth";
 import { adminDb } from "@/lib/supabase-admin";
 import DropForm from "../drop-form";
-import { isoToLocal, type LocationMode } from "../form-utils";
+import { isoToLocal } from "../form-utils";
+import type { DropEditFormValues, LocationMode } from "../form-utils";
 
 export const dynamic = "force-dynamic";
 
 // ─── Validation layer ────────────────────────────────────────────────
 
-type ValidatedDrop = {
-  id: string;
-  title: string;
-  restaurant_name: string;
-  image_url: string;
-  price: string;
-  original_price: string;
-  total_spots: string;
-  start_time: string; // datetime-local format
-  end_time: string;
-  is_active: boolean;
-  is_hero: boolean;
-  priority: string;
-  address: string;
-  latitude: string;
-  longitude: string;
-  place_id: string;
-  location_mode: LocationMode;
-};
-
 type ValidationResult =
-  | { ok: true; drop: ValidatedDrop }
+  | { ok: true; drop: DropEditFormValues }
   | { ok: false; error: string };
 
 const REQUIRED_FIELDS = ["title", "restaurant_name", "price", "total_spots", "start_time", "end_time"] as const;
@@ -38,14 +19,12 @@ function validateDrop(data: Record<string, unknown> | null, id: string): Validat
     return { ok: false, error: `Drop not found: ${id}` };
   }
 
-  // Check required fields exist
   for (const field of REQUIRED_FIELDS) {
     if (data[field] === null || data[field] === undefined) {
       return { ok: false, error: `${field} is missing for drop ${id}` };
     }
   }
 
-  // Validate timestamps are parseable
   const startDate = new Date(data.start_time as string);
   if (Number.isNaN(startDate.getTime())) {
     return { ok: false, error: `Invalid start_time for drop ${id}: ${String(data.start_time)}` };
@@ -56,15 +35,11 @@ function validateDrop(data: Record<string, unknown> | null, id: string): Validat
     return { ok: false, error: `Invalid end_time for drop ${id}: ${String(data.end_time)}` };
   }
 
-  // Existing rows may predate the location migration — read defensively
-  // and default to empty strings so the form never crashes.
   const address = data.address == null ? "" : String(data.address);
   const placeId = data.place_id == null ? "" : String(data.place_id);
   const latitude = data.latitude == null ? "" : String(data.latitude);
   const longitude = data.longitude == null ? "" : String(data.longitude);
-  // If we already have a Google place_id, resume in autocomplete mode so
-  // the UI shows the locked card with a Change Restaurant button.
-  // Otherwise start in manual mode to surface partial/legacy data.
+  const restaurantId = data.restaurant_id == null ? null : String(data.restaurant_id);
   const location_mode: LocationMode = placeId ? "autocomplete" : "manual";
 
   return {
@@ -73,6 +48,7 @@ function validateDrop(data: Record<string, unknown> | null, id: string): Validat
       id: String(data.id),
       title: String(data.title),
       restaurant_name: String(data.restaurant_name),
+      restaurant_id: restaurantId,
       image_url: data.image_url ? String(data.image_url) : "",
       price: String(data.price),
       original_price: data.original_price == null ? "" : String(data.original_price),
@@ -150,11 +126,10 @@ export default async function EditDropPage({ params }: { params: Promise<{ id: s
   await requireAdmin();
   const { id } = await params;
 
-  // 1. FETCH
   const { data, error: fetchError } = await adminDb
     .from("drop_items")
     .select(
-      "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, address, latitude, longitude, place_id",
+      "id, title, restaurant_name, restaurant_id, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, address, latitude, longitude, place_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -164,9 +139,6 @@ export default async function EditDropPage({ params }: { params: Promise<{ id: s
     return <DropError id={id} error={`Database error: ${fetchError.message}`} />;
   }
 
-  // 2. VALIDATE
-  console.log("[admin/drops/edit] DROP LOAD DEBUG", { id, raw: data });
-
   const result = validateDrop(data as Record<string, unknown> | null, id);
 
   if (!result.ok) {
@@ -174,7 +146,6 @@ export default async function EditDropPage({ params }: { params: Promise<{ id: s
     return <DropError id={id} error={result.error} />;
   }
 
-  // 3. SAFE RENDER — only validated data used below
   const drop = result.drop;
 
   return (
