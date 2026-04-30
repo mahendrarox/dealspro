@@ -451,8 +451,8 @@ export default function App({ initialDrops }: HomepageProps = {}) {
       {/* FOOD HERO IMAGE */}
       <section style={{ position: "relative", width: "100%", maxHeight: "420px", overflow: "hidden" }}>
         <Image
-          src="https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=2400&q=85"
-          alt="Overhead close-up of Indian biryani rice, naan, butter chicken, and sides on a warm table"
+          src="https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=1600&q=80"
+          alt="Indian food spread"
           width={2400}
           height={1350}
           sizes="100vw"
