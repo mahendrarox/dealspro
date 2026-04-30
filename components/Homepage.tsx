@@ -457,7 +457,7 @@ export default function App({ initialDrops }: HomepageProps = {}) {
           height={1350}
           sizes="100vw"
           priority={false}
-          style={{ width: "100%", height: "auto", display: "block", objectFit: "cover", maxHeight: "420px", borderRadius: "0 0 16px 16px" }}
+          style={{ width: "100%", height: "420px", display: "block", objectFit: "cover", borderRadius: "0 0 16px 16px" }}
         />
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "50%", background: "linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%)", borderRadius: "0 0 16px 16px", pointerEvents: "none" }} />
       </section>
