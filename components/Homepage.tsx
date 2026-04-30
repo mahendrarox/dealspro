@@ -451,7 +451,7 @@ export default function App({ initialDrops }: HomepageProps = {}) {
       {/* FOOD HERO IMAGE */}
       <section style={{ position: "relative", width: "100%", maxHeight: "420px", overflow: "hidden" }}>
         <Image
-          src="https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=1600&q=80"
+          src="/hero-food.avif"
           alt="Indian food spread"
           width={2400}
           height={1350}
