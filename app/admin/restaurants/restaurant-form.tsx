@@ -11,6 +11,7 @@ import {
   parseTagsInput,
   type RestaurantFormValues,
 } from "@/lib/admin/restaurants/types";
+import ImageUpload from "@/app/admin/components/image-upload";
 
 export { emptyRestaurantForm, type RestaurantFormValues };
 
@@ -200,6 +201,7 @@ export default function RestaurantForm({ mode, restaurantId, initial }: Props) {
       latitude: values.latitude === "" ? "" : Number(values.latitude),
       longitude: values.longitude === "" ? "" : Number(values.longitude),
       place_id: values.place_id.trim() || null,
+      image_url: values.image_url.trim() || null,
       is_active: values.is_active,
     };
 
@@ -433,6 +435,18 @@ export default function RestaurantForm({ mode, restaurantId, initial }: Props) {
           )}
           {fieldError("tags") && <div style={errStyle}>{fieldError("tags")}</div>}
         </div>
+
+        {/* ─── Hero image ─── */}
+        <ImageUpload
+          value={values.image_url}
+          onChange={(next) => update("image_url", next)}
+          label="Hero image (optional · 1200×800 recommended)"
+        />
+        {fieldError("image_url") && (
+          <div style={{ ...errStyle, marginTop: -8, marginBottom: 14 }}>
+            {fieldError("image_url")}
+          </div>
+        )}
 
         {/* ─── Active ─── */}
         <div style={{ display: "flex", gap: 20, alignItems: "center", marginTop: 8 }}>

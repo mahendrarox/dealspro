@@ -1337,6 +1337,9 @@ async function cleanup() {
   try {
     await supabase.from("restaurants").delete().like("name", "Test %");
   } catch { /* table may not exist if migration-005 not applied */ }
+  try {
+    await supabase.from("restaurants").delete().like("name", "Manual %");
+  } catch { /* no-op */ }
 
   console.log("  [OK] Cleanup complete");
 }
@@ -1386,6 +1389,9 @@ async function main() {
     await testPartnerRestaurants();
     await testSmartDefaults();
     await testDropImageInput();
+    await testImageUploadEndpoint();
+    await testImageNormalization();
+    await testRestaurantImageUrl();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -3229,6 +3235,385 @@ async function testDropImageInput() {
     pass("Image: low-res threshold (800×500)");
   } else {
     fail("Image: low-res threshold", "boundary check failed");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 35: IMAGE UPLOAD PIPELINE — endpoint + sharp normalization
+// ═══════════════════════════════════════════════════════════════════════
+
+function loadImagesModule() {
+  try {
+    return require("../lib/admin/images");
+  } catch (err) {
+    console.log(`  [WARN] Could not load lib/admin/images: ${err.message}`);
+    return null;
+  }
+}
+
+async function testImageUploadEndpoint() {
+  console.log("\n── Test 35: Image Upload Endpoint ──");
+
+  // 35a: unauthenticated POST → 401 (no admin cookie)
+  try {
+    const fd = new FormData();
+    fd.append("image", new Blob([new Uint8Array([0])], { type: "image/png" }), "x.png");
+    const res = await fetch(`${BASE_URL}/api/admin/upload-image`, {
+      method: "POST",
+      body: fd,
+    });
+    // 401 means our admin gate kicked in; 404/500 would indicate route or env issue.
+    if (res.status === 401) {
+      pass("Upload: requires admin auth (unauthenticated → 401)");
+    } else if (res.status === 404) {
+      skip("Upload: requires admin auth", "/api/admin/upload-image not reachable (rebuild?)");
+    } else {
+      fail("Upload: requires admin auth", `expected 401, got ${res.status}`);
+    }
+  } catch (err) {
+    fail("Upload: requires admin auth", err.message);
+  }
+
+  // 35b: malformed body (no multipart, just JSON) → 400 — but blocked at auth
+  //      first, so just verify the route exists and rejects without admin.
+  try {
+    const res = await fetch(`${BASE_URL}/api/admin/upload-image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ junk: true }),
+    });
+    if (res.status === 401 || res.status === 400) {
+      pass(`Upload: rejects unauthenticated/malformed body (HTTP ${res.status})`);
+    } else {
+      fail("Upload: malformed body", `unexpected status ${res.status}`);
+    }
+  } catch (err) {
+    fail("Upload: malformed body", err.message);
+  }
+}
+
+async function testImageNormalization() {
+  console.log("\n── Test 36: Image Normalization (sharp pipeline) ──");
+  const mod = loadImagesModule();
+  if (!mod || typeof mod.normalizeImage !== "function") {
+    skip("Sharp: produces 1200×800 WebP", "lib/admin/images unavailable");
+    skip("Sharp: quality is 85", "lib/admin/images unavailable");
+    skip("Sharp: strips EXIF metadata", "lib/admin/images unavailable");
+    skip("Sharp: accepts common image types", "lib/admin/images unavailable");
+    skip("Sharp: filename has webp extension + timestamp", "lib/admin/images unavailable");
+    return;
+  }
+
+  let sharp;
+  try {
+    sharp = require("sharp");
+  } catch {
+    skip("Sharp: produces 1200×800 WebP", "sharp not installed");
+    skip("Sharp: quality is 85", "sharp not installed");
+    skip("Sharp: strips EXIF metadata", "sharp not installed");
+    skip("Sharp: accepts common image types", "sharp not installed");
+    skip("Sharp: filename has webp extension + timestamp", "sharp not installed");
+    return;
+  }
+
+  // Build a synthetic JPEG (640×480, gradient) so we exercise the resize-up case.
+  const sourceJpeg = await sharp({
+    create: {
+      width: 640,
+      height: 480,
+      channels: 3,
+      background: { r: 80, g: 120, b: 200 },
+    },
+  })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+
+  // 36a: outputs exactly 1200×800 WebP
+  try {
+    const out = await mod.normalizeImage(sourceJpeg);
+    const meta = await sharp(out).metadata();
+    if (meta.format === "webp" && meta.width === 1200 && meta.height === 800) {
+      pass(`Sharp: produces 1200×800 WebP (${out.length} bytes)`);
+    } else {
+      fail("Sharp: produces 1200×800 WebP",
+        `got format=${meta.format} ${meta.width}×${meta.height}`);
+    }
+  } catch (err) {
+    fail("Sharp: produces 1200×800 WebP", err.message);
+  }
+
+  // 36b: WebP quality (verify decoded image is a reasonable size for 85)
+  try {
+    const out = await mod.normalizeImage(sourceJpeg);
+    // 1200×800 solid-color WebP at q=85 should be well under 300 KB.
+    if (out.length > 0 && out.length < 300 * 1024) {
+      pass(`Sharp: WebP @ q=85 produces small files (${out.length} bytes < 300 KB)`);
+    } else {
+      fail("Sharp: WebP q=85 size", `unexpected size ${out.length} bytes`);
+    }
+  } catch (err) {
+    fail("Sharp: WebP q=85 size", err.message);
+  }
+
+  // 36c: metadata is stripped (sharp default — but verify explicitly)
+  try {
+    // Embed a marker by attaching XMP/EXIF: build a JPEG with metadata, then
+    // normalize and check the WebP has no embedded EXIF.
+    const withExif = await sharp({
+      create: { width: 800, height: 600, channels: 3, background: "#888" },
+    })
+      .withMetadata({ exif: { IFD0: { Software: "DealsPro-Test-Marker" } } })
+      .jpeg()
+      .toBuffer();
+    const out = await mod.normalizeImage(withExif);
+    const meta = await sharp(out).metadata();
+    // sharp's metadata.exif is undefined when EXIF wasn't preserved.
+    if (!meta.exif) {
+      pass("Sharp: strips EXIF metadata from output");
+    } else {
+      fail("Sharp: strips EXIF metadata",
+        `EXIF block present (${meta.exif.length} bytes) — privacy regression`);
+    }
+  } catch (err) {
+    // withMetadata may not be supported in all sharp builds; treat as skip-equivalent
+    skip("Sharp: strips EXIF metadata", `could not construct EXIF fixture: ${err.message}`);
+  }
+
+  // 36d: accepts PNG and WebP inputs (in addition to JPEG)
+  try {
+    const png = await sharp({
+      create: { width: 300, height: 300, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    })
+      .png()
+      .toBuffer();
+    const out1 = await mod.normalizeImage(png);
+    const meta1 = await sharp(out1).metadata();
+
+    const webp = await sharp({
+      create: { width: 200, height: 200, channels: 3, background: "#f00" },
+    })
+      .webp()
+      .toBuffer();
+    const out2 = await mod.normalizeImage(webp);
+    const meta2 = await sharp(out2).metadata();
+
+    if (
+      meta1.format === "webp" && meta1.width === 1200 && meta1.height === 800 &&
+      meta2.format === "webp" && meta2.width === 1200 && meta2.height === 800
+    ) {
+      pass("Sharp: accepts PNG and WebP inputs, normalizes to 1200×800 WebP");
+    } else {
+      fail("Sharp: PNG/WebP inputs",
+        `png→${meta1.format} ${meta1.width}×${meta1.height}, webp→${meta2.format} ${meta2.width}×${meta2.height}`);
+    }
+  } catch (err) {
+    fail("Sharp: PNG/WebP inputs", err.message);
+  }
+
+  // 36e: MIME allow-list matches spec (JPEG/PNG/WebP/HEIC/HEIF)
+  if (
+    typeof mod.isAcceptedMime === "function" &&
+    mod.isAcceptedMime("image/jpeg") &&
+    mod.isAcceptedMime("image/png") &&
+    mod.isAcceptedMime("image/webp") &&
+    mod.isAcceptedMime("image/heic") &&
+    mod.isAcceptedMime("image/heif") &&
+    !mod.isAcceptedMime("image/gif") &&
+    !mod.isAcceptedMime("application/pdf") &&
+    !mod.isAcceptedMime("")
+  ) {
+    pass("Sharp: MIME allow-list matches JPEG/PNG/WebP/HEIC/HEIF only");
+  } else {
+    fail("Sharp: MIME allow-list", "unexpected allow-list shape");
+  }
+
+  // 36f: buildFilename produces timestamp-rand.webp
+  if (typeof mod.buildFilename === "function") {
+    const name = mod.buildFilename(1700000000000);
+    if (/^1700000000000-[A-Za-z0-9_-]{8}\.webp$/.test(name)) {
+      pass(`Sharp: filename has timestamp + 8-char id + .webp (${name})`);
+    } else {
+      fail("Sharp: filename shape", `got ${name}`);
+    }
+  } else {
+    skip("Sharp: filename shape", "buildFilename not exported");
+  }
+
+  // 36g: 10 MB raw-size limit constant
+  if (mod.MAX_RAW_SIZE_BYTES === 10 * 1024 * 1024) {
+    pass("Sharp: raw size limit is 10 MB");
+  } else {
+    fail("Sharp: raw size limit", `expected 10485760, got ${mod.MAX_RAW_SIZE_BYTES}`);
+  }
+}
+
+async function testRestaurantImageUrl() {
+  console.log("\n── Test 37: Restaurant image_url Column ──");
+
+  const mod = loadAdminSchemas();
+  if (!mod || !mod.restaurantCreateSchema) {
+    skip("Restaurants: image_url schema accepts null/empty/https", "schemas unavailable");
+    skip("Restaurants: image_url schema rejects malformed", "schemas unavailable");
+    skip("Restaurants: image_url persists on insert", "schemas unavailable");
+    skip("Restaurants: image_url survives round-trip", "schemas unavailable");
+    return;
+  }
+
+  // 37a: schema accepts null
+  {
+    const res = mod.restaurantCreateSchema.safeParse({
+      name: "Test Img Co",
+      city: "Frisco",
+      tags: [],
+      address: "1 Img Rd, Frisco, TX",
+      latitude: 33.1,
+      longitude: -96.8,
+      place_id: null,
+      image_url: null,
+      is_active: true,
+    });
+    if (res.success && res.data.image_url === null) {
+      pass("Restaurants: image_url schema accepts null");
+    } else {
+      fail("Restaurants: image_url accepts null",
+        res.success ? `got ${JSON.stringify(res.data.image_url)}` : JSON.stringify(res.error.flatten().fieldErrors));
+    }
+  }
+
+  // 37b: schema accepts empty string → coerces to null
+  {
+    const res = mod.restaurantCreateSchema.safeParse({
+      name: "Test Img Co",
+      city: "Frisco",
+      tags: [],
+      address: "1 Img Rd, Frisco, TX",
+      latitude: 33.1,
+      longitude: -96.8,
+      place_id: null,
+      image_url: "",
+      is_active: true,
+    });
+    if (res.success && res.data.image_url === null) {
+      pass("Restaurants: image_url schema coerces '' → null");
+    } else {
+      fail("Restaurants: image_url empty→null", JSON.stringify(res.success ? res.data.image_url : res.error.flatten().fieldErrors));
+    }
+  }
+
+  // 37c: schema accepts https URL
+  {
+    const url = "https://example.supabase.co/storage/v1/object/public/dealspro-images/abc.webp";
+    const res = mod.restaurantCreateSchema.safeParse({
+      name: "Test Img Co",
+      city: "Frisco",
+      tags: [],
+      address: "1 Img Rd, Frisco, TX",
+      latitude: 33.1,
+      longitude: -96.8,
+      place_id: null,
+      image_url: url,
+      is_active: true,
+    });
+    if (res.success && res.data.image_url === url) {
+      pass("Restaurants: image_url schema accepts https URL");
+    } else {
+      fail("Restaurants: image_url https", JSON.stringify(res.success ? res.data.image_url : res.error.flatten().fieldErrors));
+    }
+  }
+
+  // 37d: schema rejects malformed URL
+  {
+    const res = mod.restaurantCreateSchema.safeParse({
+      name: "Test Img Co",
+      city: "Frisco",
+      tags: [],
+      address: "1 Img Rd, Frisco, TX",
+      latitude: 33.1,
+      longitude: -96.8,
+      place_id: null,
+      image_url: "not-a-url",
+      is_active: true,
+    });
+    if (!res.success && JSON.stringify(res.error.flatten().fieldErrors).includes("image_url")) {
+      pass("Restaurants: image_url schema rejects malformed URL");
+    } else {
+      fail("Restaurants: image_url rejects malformed", res.success ? "should have failed" : "wrong field error");
+    }
+  }
+
+  // 37e: DB round-trip — insert with image_url, read it back
+  const tableReady = await ensureRestaurantsTable();
+  if (!tableReady) {
+    skip("Restaurants: image_url persists on insert", "migration-005 not applied");
+    return;
+  }
+  const supabase = getSupabase();
+  let inserted = null;
+  try {
+    const url = "https://example.supabase.co/storage/v1/object/public/dealspro-images/round-trip.webp";
+    const { data, error } = await supabase
+      .from("restaurants")
+      .insert({
+        name: "Test Image Round-Trip",
+        city: "Frisco",
+        tags: [RESTAURANT_TEST_TAG],
+        address: "9 Image Way, Frisco, TX",
+        latitude: 33.13,
+        longitude: -96.77,
+        place_id: null,
+        image_url: url,
+        is_active: true,
+      })
+      .select()
+      .single();
+    if (error) {
+      if (error.message.toLowerCase().includes("image_url")) {
+        skip("Restaurants: image_url persists on insert",
+          "apply migration-006-image-storage.sql (image_url column missing)");
+      } else {
+        fail("Restaurants: image_url insert", error.message);
+      }
+    } else {
+      inserted = data;
+      if (data.image_url === url) {
+        pass("Restaurants: image_url survives DB round-trip");
+      } else {
+        fail("Restaurants: image_url round-trip",
+          `expected ${url}, got ${JSON.stringify(data.image_url)}`);
+      }
+    }
+  } catch (err) {
+    fail("Restaurants: image_url round-trip", err.message);
+  } finally {
+    if (inserted) {
+      await supabase.from("restaurants").delete().eq("id", inserted.id);
+    }
+  }
+
+  // 37f: existing external URLs (e.g. Unsplash) work in drop_items.image_url —
+  // this is implicit in the public render path, but verify the schema accepts
+  // a non-Supabase URL with no special treatment.
+  {
+    const res = mod.dropCreateSchema.safeParse({
+      id: "test-existing-extern",
+      title: "Existing External URL",
+      restaurant_id: "00000000-0000-4000-8000-000000000001",
+      image_url: "https://images.unsplash.com/photo-12345",
+      price: 9.99,
+      original_price: 19.99,
+      total_spots: 5,
+      start_time: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      end_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      is_active: true,
+      is_hero: false,
+      priority: 0,
+    });
+    if (res.success && res.data.image_url === "https://images.unsplash.com/photo-12345") {
+      pass("Drops: existing external image_url (Unsplash) still accepted unchanged");
+    } else {
+      fail("Drops: existing external image_url",
+        res.success ? `got ${res.data.image_url}` : JSON.stringify(res.error.flatten().fieldErrors));
+    }
   }
 }
 

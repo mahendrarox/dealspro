@@ -23,6 +23,7 @@ function rowToFormValues(r: Restaurant): RestaurantFormValues {
     latitude: String(r.latitude),
     longitude: String(r.longitude),
     place_id: r.place_id ?? "",
+    image_url: r.image_url ?? "",
     is_active: r.is_active,
     location_mode: r.place_id ? "autocomplete" : "manual",
   };
