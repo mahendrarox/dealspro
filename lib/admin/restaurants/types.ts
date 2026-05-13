@@ -17,6 +17,7 @@ export type Restaurant = {
   latitude: number;
   longitude: number;
   place_id: string | null;
+  image_url: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -39,6 +40,7 @@ export type RestaurantFormValues = {
   latitude: string;
   longitude: string;
   place_id: string;
+  image_url: string;
   is_active: boolean;
   /** Form-only discriminator: "autocomplete" or "manual". Not persisted. */
   location_mode: "autocomplete" | "manual";
@@ -52,6 +54,7 @@ export const emptyRestaurantForm = (): RestaurantFormValues => ({
   latitude: "",
   longitude: "",
   place_id: "",
+  image_url: "",
   is_active: true,
   location_mode: "autocomplete",
 });

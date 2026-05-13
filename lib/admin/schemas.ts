@@ -61,6 +61,12 @@ export const restaurantCreateSchema = z.object({
     message: "longitude must be between -180 and 180",
   }),
   place_id: optionalStringSchema.default(null),
+  image_url: z
+    .string()
+    .url("must be a valid URL")
+    .nullable()
+    .or(z.literal("").transform(() => null))
+    .default(null),
   is_active: z.boolean().default(true),
 });
 

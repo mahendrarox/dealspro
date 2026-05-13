@@ -10,7 +10,7 @@ import {
   type DropCreateFormValues,
   type DropEditFormValues,
 } from "./form-utils";
-import DropImageInput from "./drop-image-input";
+import ImageUpload from "@/app/admin/components/image-upload";
 import type { RestaurantOption } from "@/lib/admin/restaurants/types";
 
 // Re-export for backward compatibility with existing imports.
@@ -309,12 +309,17 @@ function CreateDropForm({
           {fieldError("id") && <div style={errStyle}>{fieldError("id")}</div>}
         </div>
 
-        {/* ─── Image URL + live preview (mirrors public DropCard) ─── */}
-        <DropImageInput
+        {/* ─── Image (upload or paste URL) ─── */}
+        <ImageUpload
           value={values.image_url}
           onChange={(next) => update("image_url", next)}
-          serverError={fieldError("image_url")}
+          label="Image (1200×800 recommended)"
         />
+        {fieldError("image_url") && (
+          <div style={{ fontSize: 11, color: T.red, marginTop: -8, marginBottom: 14 }}>
+            {fieldError("image_url")}
+          </div>
+        )}
 
         {/* ─── Price / Original / Spots ─── */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
@@ -560,12 +565,17 @@ function EditDropForm({ initial }: { initial: DropEditFormValues }) {
           </div>
         </div>
 
-        {/* ─── Image URL + live preview (mirrors public DropCard) ─── */}
-        <DropImageInput
+        {/* ─── Image (upload or paste URL) ─── */}
+        <ImageUpload
           value={values.image_url}
           onChange={(next) => update("image_url", next)}
-          serverError={fieldError("image_url")}
+          label="Image (1200×800 recommended)"
         />
+        {fieldError("image_url") && (
+          <div style={{ fontSize: 11, color: T.red, marginTop: -8, marginBottom: 14 }}>
+            {fieldError("image_url")}
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
           <div style={fieldWrap}>
