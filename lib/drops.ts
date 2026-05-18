@@ -2,18 +2,16 @@ import type { DropItem } from "@/lib/drops/types";
 
 /**
  * Returns the purchase cutoff time (ms since epoch) for a drop.
- * Purchase window closes at `start_time` on the drop's `date`.
- * If fields are missing/invalid, returns Infinity (treat as always buyable).
+ * Purchase window closes at the drop's `start_time_iso` instant.
+ *
+ * Reads from the UTC instant — the legacy `date` / `start_time` string
+ * fields are server-local wall-clock projections and were producing
+ * Infinity-ish drift when the runtime TZ differed from the audience TZ.
  */
 export function getPurchaseCutoff(drop: DropItem): number {
-  try {
-    if (!drop.date || !drop.start_time) return Infinity;
-    const d = new Date(`${drop.date}T${drop.start_time}:00`);
-    const t = d.getTime();
-    return Number.isNaN(t) ? Infinity : t;
-  } catch {
-    return Infinity;
-  }
+  if (!drop.start_time_iso) return Infinity;
+  const t = new Date(drop.start_time_iso).getTime();
+  return Number.isFinite(t) ? t : Infinity;
 }
 
 /**
@@ -58,46 +56,53 @@ export function isSoldOutDrop(
 /**
  * Deterministic featured drop selection.
  *
- * Priority order:
- *   1. Admin-set hero (is_hero = true) wins over everything else
- *   2. Lower admin priority value wins
- *   3. Earliest purchase cutoff
- *   4. Lowest remaining spots
- *   5. Alphabetical id (tiebreaker for full determinism)
+ * Admin intent wins: if any drop in `allDrops` has `is_hero = true`, it
+ * is rendered as the hero regardless of cutoff or sold-out state. The
+ * DropCard CTA layer already shows the correct "Ended" / "Ordering
+ * Closed" / "Sold Out" state for expired or empty drops, so an explicit
+ * hero pick stays visible until the admin clears the flag.
  *
- * The DB query (`getActiveDropsFromDb`) already orders by hero+priority,
- * so SSR shows the hero first. This function ensures the client-side
- * selection that runs after the spots fetch doesn't override the hero
- * with a different drop, which would cause a hero-flicker on hydration.
+ * If no admin hero exists, fall back to auto-selection from active drops:
+ *   1. Lower admin priority value wins
+ *   2. Earliest purchase cutoff
+ *   3. Lowest remaining spots
+ *   4. Alphabetical id (tiebreaker for full determinism)
+ *
+ * The DB query (`getActiveDropsFromDb`) orders by hero+priority so SSR
+ * shows the hero first, and `drops[0]` matches what this returns —
+ * no hero-flicker on hydration.
  */
 export function selectFeatured(
+  allDrops: DropItem[],
   activeDrops: DropItem[],
   spotsMap: Record<string, number>,
 ): DropItem | null {
+  // Admin override — is_hero wins regardless of cutoff/sold-out state.
+  // We still respect status: "cancelled" should suppress the hero.
+  const adminHero = allDrops.find(
+    (d) => d.is_hero === true && (!d.status || d.status !== "cancelled"),
+  );
+  if (adminHero) return adminHero;
+
   if (activeDrops.length === 0) return null;
 
   const sorted = [...activeDrops].sort((a, b) => {
-    // 1. Hero flag wins (true sorts before false)
-    const heroA = a.is_hero === true ? 1 : 0;
-    const heroB = b.is_hero === true ? 1 : 0;
-    if (heroA !== heroB) return heroB - heroA;
-
-    // 2. Lower priority value wins (default 0 if absent)
+    // 1. Lower priority value wins (default 0 if absent)
     const prA = a.priority ?? 0;
     const prB = b.priority ?? 0;
     if (prA !== prB) return prA - prB;
 
-    // 3. Earliest cutoff
+    // 2. Earliest cutoff
     const cutoffA = getPurchaseCutoff(a);
     const cutoffB = getPurchaseCutoff(b);
     if (cutoffA !== cutoffB) return cutoffA - cutoffB;
 
-    // 4. Lowest remaining spots
+    // 3. Lowest remaining spots
     const spotsA = spotsMap[a.id] ?? a.total_spots;
     const spotsB = spotsMap[b.id] ?? b.total_spots;
     if (spotsA !== spotsB) return spotsA - spotsB;
 
-    // 5. Alphabetical id (deterministic tiebreaker)
+    // 4. Alphabetical id (deterministic tiebreaker)
     return String(a.id).localeCompare(String(b.id));
   });
 

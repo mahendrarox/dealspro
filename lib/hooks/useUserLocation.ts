@@ -62,8 +62,11 @@ export function useUserLocation() {
   }, []);
 
   const getDistance = useCallback(
-    (itemLat: number, itemLng: number): string | null => {
+    (itemLat: number | null, itemLng: number | null): string | null => {
       if (!coords) return null;
+      // Missing drop coords — don't manufacture a "6620 mi away" pill
+      // by computing against a (0,0) sentinel.
+      if (itemLat === null || itemLng === null) return null;
       const d = haversineDistance(coords.lat, coords.lng, itemLat, itemLng);
       return `${d} mi away`;
     },

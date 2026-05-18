@@ -30,9 +30,14 @@ export interface DropItem {
   status: "live" | "sold_out" | "expired" | "cancelled";
   stripe_price_id: string;
   redemption_valid_until: string; // ISO datetime
-  address: string;
-  lat: number;
-  lng: number;
+  /**
+   * Location fields are nullable. Legacy drops created before the
+   * partner-restaurant entity may have no address or coordinates.
+   * UI must guard distance/maps rendering against null.
+   */
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
   /** Admin-managed hero flag (drop_items.is_hero). Optional for legacy callers. */
   is_hero?: boolean;
   /** Admin-managed display priority (drop_items.priority). Lower comes first. */

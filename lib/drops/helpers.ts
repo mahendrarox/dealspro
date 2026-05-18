@@ -9,11 +9,13 @@ import type { DropItem } from "./types";
 
 // ─── Time Helpers ─────────────────────────────────────────────────────
 //
-// All comparisons below use the authoritative UTC instants
+// All comparisons AND display below use the authoritative UTC instants
 // `start_time_iso` / `end_time_iso`. The string fields `date`,
-// `start_time`, `end_time` are display-only and MUST NOT be used for
-// logic — they are server-local wall-clock projections that silently
-// lose the end date when a drop spans midnight.
+// `start_time`, `end_time` on DropItem are kept for legacy callers
+// (Stripe receipt description, ticket flow) but MUST NOT be used here —
+// they are server-local wall-clock projections that render incorrectly
+// when the runtime TZ differs from the audience TZ (e.g. Vercel UTC vs
+// DFW Central).
 
 /** True if current time is before the drop's start and it isn't cancelled. */
 export function canPurchase(item: DropItem): boolean {
@@ -43,54 +45,80 @@ export function isRedemptionValid(item: DropItem): boolean {
   return new Date() < new Date(item.redemption_valid_until);
 }
 
-/** Format time window for display: "5–7 PM" or "6–8 PM" */
-export function formatTimeWindow(item: DropItem): string {
-  const fmt = (t: string) => {
-    const [h] = t.split(":").map(Number);
-    // Standard 12-hour clock: 0 → 12 AM (midnight), 12 → 12 PM (noon).
-    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    const ampm = h >= 12 ? "PM" : "AM";
-    return { hour12, ampm };
-  };
-  const start = fmt(item.start_time);
-  const end = fmt(item.end_time);
-  if (start.ampm === end.ampm) {
-    return `${start.hour12}–${end.hour12} ${end.ampm}`;
-  }
-  return `${start.hour12} ${start.ampm}–${end.hour12} ${end.ampm}`;
+// ─── Display TZ (always Central) ──────────────────────────────────────
+//
+// DealsPro is a DFW-area service. All audience-facing dates and times
+// render in America/Chicago regardless of where the server or visitor
+// is — the drop is held in Frisco; that's the wall clock that matters.
+// Reading from `start_time_iso` / `end_time_iso` with Intl.DateTimeFormat
+// makes the output independent of process timezone (was broken on
+// Vercel's UTC default).
+
+const DISPLAY_TZ = "America/Chicago";
+
+/** Extract { hour, minute, ampm } from a UTC instant in Central TZ. */
+function centralHM(iso: string): { hour: number; minute: number; ampm: "AM" | "PM" } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: DISPLAY_TZ,
+    hour: "numeric",
+    minute: "numeric",
+    hour12: true,
+  }).formatToParts(new Date(iso));
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "12");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const ampm = (parts.find((p) => p.type === "dayPeriod")?.value ?? "AM").toUpperCase() as "AM" | "PM";
+  return { hour, minute, ampm };
 }
 
-/** Format date for display: "Friday, Mar 28" */
+/** Extract { y, m, d } from a UTC instant in Central TZ. */
+function centralYMD(iso: string | Date): { y: number; m: number; d: number } {
+  const date = typeof iso === "string" ? new Date(iso) : iso;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: DISPLAY_TZ,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  return {
+    y: Number(parts.find((p) => p.type === "year")?.value ?? "0"),
+    m: Number(parts.find((p) => p.type === "month")?.value ?? "0"),
+    d: Number(parts.find((p) => p.type === "day")?.value ?? "0"),
+  };
+}
+
+/** Format time window for display: "5–7 PM" or "11 AM–1 PM". */
+export function formatTimeWindow(item: DropItem): string {
+  const start = centralHM(item.start_time_iso);
+  const end = centralHM(item.end_time_iso);
+  // Hour-only display unless minute is non-zero (mirrors the prior
+  // format — minutes were always silently dropped before).
+  const side = (hm: { hour: number; minute: number }) =>
+    hm.minute === 0 ? `${hm.hour}` : `${hm.hour}:${String(hm.minute).padStart(2, "0")}`;
+  if (start.ampm === end.ampm) {
+    return `${side(start)}–${side(end)} ${end.ampm}`;
+  }
+  return `${side(start)} ${start.ampm}–${side(end)} ${end.ampm}`;
+}
+
+/** Format date for display: "Friday, Mar 28" — in Central TZ. */
 export function formatDate(item: DropItem): string {
-  const d = new Date(`${item.date}T12:00:00`);
-  return d.toLocaleDateString("en-US", {
+  return new Date(item.start_time_iso).toLocaleDateString("en-US", {
     weekday: "long",
     month: "short",
     day: "numeric",
+    timeZone: DISPLAY_TZ,
   });
-}
-
-/** Get current date in US Central Time (DFW area) */
-function getCentralDate(d: Date): { year: number; month: number; day: number } {
-  const parts = d
-    .toLocaleDateString("en-US", {
-      timeZone: "America/Chicago",
-      year: "numeric",
-      month: "numeric",
-      day: "numeric",
-    })
-    .split("/");
-  return { year: parseInt(parts[2]), month: parseInt(parts[0]), day: parseInt(parts[1]) };
 }
 
 /**
  * Human-readable time context with time window.
  * "Tonight · 5–7 PM" | "Tomorrow · 5–7 PM" | "Thu, Apr 2 · 5–7 PM"
- * Uses US Central Time for today/tomorrow calculations (DFW area).
+ * "Today" / "Tomorrow" comparisons run in America/Chicago so a
+ * DFW user sees the same labels regardless of where the server runs.
  */
 export function getTimeContext(item: DropItem): string {
   const now = new Date();
-  const eventDate = new Date(`${item.date}T${item.start_time}:00`);
+  const eventDate = new Date(item.start_time_iso);
   const diffMs = eventDate.getTime() - now.getTime();
   const tw = formatTimeWindow(item);
 
@@ -99,11 +127,10 @@ export function getTimeContext(item: DropItem): string {
     return "Ended";
   }
 
-  const todayCT = getCentralDate(now);
-  const [ey, em, ed] = item.date.split("-").map(Number);
-
-  const todayNum = todayCT.year * 10000 + todayCT.month * 100 + todayCT.day;
-  const eventNum = ey * 10000 + em * 100 + ed;
+  const todayCT = centralYMD(now);
+  const eventCT = centralYMD(eventDate);
+  const todayNum = todayCT.y * 10000 + todayCT.m * 100 + todayCT.d;
+  const eventNum = eventCT.y * 10000 + eventCT.m * 100 + eventCT.d;
   const dayDiff = eventNum - todayNum;
 
   if (dayDiff === 0) {
@@ -114,11 +141,11 @@ export function getTimeContext(item: DropItem): string {
   if (dayDiff === 1) return `Tomorrow · ${tw}`;
 
   // "Thu, Apr 2 · 5–7 PM"
-  const d = new Date(`${item.date}T12:00:00`);
-  const short = d.toLocaleDateString("en-US", {
+  const short = new Date(item.start_time_iso).toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
+    timeZone: DISPLAY_TZ,
   });
   return `${short} · ${tw}`;
 }

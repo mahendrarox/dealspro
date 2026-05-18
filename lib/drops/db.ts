@@ -70,9 +70,12 @@ function dbRowToDropItem(row: DbDropRow): DropItem {
     status: row.is_active ? "live" : "expired",
     stripe_price_id: "",
     redemption_valid_until: end.toISOString(),
-    address: row.address ?? "",
-    lat: row.latitude ?? 0,
-    lng: row.longitude ?? 0,
+    // Surface nulls — coercing to 0 manufactures a real-looking
+    // (0°N, 0°E) coordinate in the Gulf of Guinea and breaks distance
+    // calculations. UI guards rendering when these are null.
+    address: row.address ?? null,
+    lat: row.latitude,
+    lng: row.longitude,
     is_hero: row.is_hero,
     priority: row.priority,
   };
