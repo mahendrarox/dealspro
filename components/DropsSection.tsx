@@ -155,7 +155,9 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
         <div style={{ opacity: sold ? 0.5 : 1 }}>
           <div style={{ fontFamily: T.font.display, fontSize: "18px", fontWeight: 600, color: T.color.n900, lineHeight: 1.3 }}>{item.title}</div>
           <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n500, marginTop: "4px" }}>{item.restaurant_name} · {formatDate(item)}</div>
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "4px" }}>📍 {item.address}{distance ? ` · ${distance}` : ""}</div>
+          {(item.address || distance) && (
+            <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "4px" }}>📍 {item.address ?? ""}{item.address && distance ? " · " : ""}{distance ?? ""}</div>
+          )}
           <div style={{ fontFamily: T.font.mono, fontSize: "12px", color: T.color.n400, marginTop: "4px" }}>⏰ {formatTimeWindow(item)}</div>
         </div>
         {/* Pricing */}
@@ -292,7 +294,11 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
   const soldOutDrops = ready
     ? drops.filter((d) => isSoldOutDrop(d, spots[d.id] ?? d.total_spots, now))
     : [];
-  const featured = ready ? selectFeatured(activeDrops, spots) : null;
+  // selectFeatured receives the full drops list so it can honor an
+  // admin-set hero even when that drop's cutoff has passed (the
+  // DropCard CTA layer renders the correct "Ended" / "Ordering Closed"
+  // state for an expired hero).
+  const featured = ready ? selectFeatured(drops, activeDrops, spots) : null;
   const remaining = featured ? getRemainingDrops(activeDrops, featured) : [];
 
   // Notify parent of computed data (for hero featured card)

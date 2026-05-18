@@ -1372,6 +1372,7 @@ async function main() {
     await testPhoneSearch();
     await testDropEdgeCases();
     await testTimeHelpers();
+    await testDistanceGuards();
     await testAdminUnauthenticated();
     await testAdminWrongEmail();
     await testZodInvalidInput();
@@ -1657,13 +1658,13 @@ async function testDropEdgeCases() {
   // Import the drop helpers by testing them inline
   // These mirror the logic in lib/drops.ts
 
+  // Mirrors lib/drops.ts post-fix: cutoff reads start_time_iso directly,
+  // selectFeatured takes (allDrops, activeDrops, spotsMap) and lets
+  // is_hero override the cutoff filter.
   function getPurchaseCutoff(drop) {
-    try {
-      if (!drop.date || !drop.start_time) return Infinity;
-      const d = new Date(`${drop.date}T${drop.start_time}:00`);
-      const t = d.getTime();
-      return Number.isNaN(t) ? Infinity : t;
-    } catch { return Infinity; }
+    if (!drop.start_time_iso) return Infinity;
+    const t = new Date(drop.start_time_iso).getTime();
+    return Number.isFinite(t) ? t : Infinity;
   }
 
   function isActiveDrop(drop, spotsRemaining, now) {
@@ -1679,9 +1680,16 @@ async function testDropEdgeCases() {
     return spotsRemaining === 0;
   }
 
-  function selectFeatured(activeDrops, spotsMap) {
+  function selectFeatured(allDrops, activeDrops, spotsMap) {
+    const adminHero = allDrops.find(
+      (d) => d.is_hero === true && (!d.status || d.status !== "cancelled"),
+    );
+    if (adminHero) return adminHero;
     if (activeDrops.length === 0) return null;
     const sorted = [...activeDrops].sort((a, b) => {
+      const prA = a.priority ?? 0;
+      const prB = b.priority ?? 0;
+      if (prA !== prB) return prA - prB;
       const cutoffA = getPurchaseCutoff(a);
       const cutoffB = getPurchaseCutoff(b);
       if (cutoffA !== cutoffB) return cutoffA - cutoffB;
@@ -1693,15 +1701,28 @@ async function testDropEdgeCases() {
     return sorted[0];
   }
 
-  // Helper to create test drops
-  const makeDrop = (id, date, startTime, totalSpots, status = "live") => ({
-    id, date, start_time: startTime, end_time: "19:00",
-    total_spots: totalSpots, status,
-    restaurant_name: "Test", title: "Test", price: 9.99,
-    original_price: 19.99, drop_id: "test", image_url: "",
-    stripe_price_id: "", redemption_valid_until: "",
-    address: "Test", lat: 0, lng: 0,
-  });
+  // Helper to create test drops. Builds start_time_iso/end_time_iso
+  // from (date, startTime) interpreted as Central time so the
+  // synthetic drops behave the same as DB rows.
+  const makeDrop = (id, date, startTime, totalSpots, status = "live", opts = {}) => {
+    const endTime = opts.endTime ?? "19:00";
+    // "2099-12-01T17:00 America/Chicago" → UTC instant. Building via
+    // explicit -06:00 (CST) is close enough for these regression cases;
+    // tests don't span DST boundaries.
+    const startIso = new Date(`${date}T${startTime}:00-06:00`).toISOString();
+    const endIso = new Date(`${date}T${endTime}:00-06:00`).toISOString();
+    return {
+      id, date, start_time: startTime, end_time: endTime,
+      start_time_iso: startIso, end_time_iso: endIso,
+      total_spots: totalSpots, status,
+      restaurant_name: "Test", title: "Test", price: 9.99,
+      original_price: 19.99, drop_id: "test", image_url: "",
+      stripe_price_id: "", redemption_valid_until: "",
+      address: "Test", lat: null, lng: null,
+      is_hero: opts.is_hero ?? false,
+      priority: opts.priority ?? 0,
+    };
+  };
 
   const farFuture = new Date("2099-01-01T00:00:00").getTime();
 
@@ -1741,7 +1762,7 @@ async function testDropEdgeCases() {
     const now = new Date("2099-01-01T00:00:00").getTime();
     const spots = { d1: 3 };
     const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
-    const featured = selectFeatured(active, spots);
+    const featured = selectFeatured(drops, active, spots);
     const remaining = active.filter(d => d.id !== featured?.id);
     if (active.length === 1 && featured?.id === "d1" && remaining.length === 0) {
       pass("Edge: 1 active drop → only featured, no list");
@@ -1760,7 +1781,7 @@ async function testDropEdgeCases() {
     const now = new Date("2099-01-01T00:00:00").getTime();
     const spots = { d1: 3, d2: 2, d3: 5 };
     const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
-    const featured = selectFeatured(active, spots);
+    const featured = selectFeatured(drops, active, spots);
     const remaining = active.filter(d => d.id !== featured?.id);
     if (active.length === 3 && featured && remaining.length === 2) {
       pass("Edge: 2+ active drops → featured + remaining list");
@@ -1778,8 +1799,8 @@ async function testDropEdgeCases() {
     const now = new Date("2099-01-01T00:00:00").getTime();
     const spots = { d1: 3, d2: 3 };
     const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
-    const f1 = selectFeatured(active, spots);
-    const f2 = selectFeatured(active, spots);
+    const f1 = selectFeatured(drops, active, spots);
+    const f2 = selectFeatured(drops, active, spots);
     if (f1?.id === f2?.id && f1 !== null) {
       pass("Edge: deterministic selection — same result on two runs");
     } else {
@@ -1796,7 +1817,7 @@ async function testDropEdgeCases() {
     const now = new Date("2099-01-01T00:00:00").getTime();
     const spots = { "d-later": 3, "d-earlier": 3 };
     const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
-    const featured = selectFeatured(active, spots);
+    const featured = selectFeatured(drops, active, spots);
     if (featured?.id === "d-earlier") {
       pass("Edge: earlier cutoff wins featured selection");
     } else {
@@ -1813,11 +1834,77 @@ async function testDropEdgeCases() {
     const now = new Date("2099-01-01T00:00:00").getTime();
     const spots = { "d-more-spots": 8, "d-fewer-spots": 2 };
     const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
-    const featured = selectFeatured(active, spots);
+    const featured = selectFeatured(drops, active, spots);
     if (featured?.id === "d-fewer-spots") {
       pass("Edge: lower spots wins featured selection");
     } else {
       fail("Edge: lower spots wins", `featured=${featured?.id}`);
+    }
+  }
+
+  // 17g2: Admin is_hero override — wins even after cutoff has passed.
+  //       Bug 1 contract pin: the homepage hero card MUST render the
+  //       admin-set drop, not silently swap to a different drop just
+  //       because the hero's start_time is in the past.
+  {
+    const drops = [
+      // Admin's hero: cutoff already passed
+      makeDrop("d-hero-expired", "2026-01-01", "17:00", 5, "live", { is_hero: true }),
+      // Other active drops in the future
+      makeDrop("d-future-1", "2099-12-01", "17:00", 5),
+      makeDrop("d-future-2", "2099-12-02", "17:00", 5),
+    ];
+    const now = new Date("2026-06-01T00:00:00Z").getTime(); // past hero, before others
+    const spots = { "d-hero-expired": 5, "d-future-1": 5, "d-future-2": 5 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const featured = selectFeatured(drops, active, spots);
+    if (featured?.id === "d-hero-expired") {
+      pass("Hero override: admin is_hero wins even when cutoff has passed");
+    } else {
+      fail("Hero override: expired hero wins", `featured=${featured?.id} (expected d-hero-expired, active=${active.length})`);
+    }
+    // Also verify the hero is NOT in activeDrops (since cutoff passed),
+    // which means UI will need to render it via the admin-override path.
+    const heroInActive = active.some(d => d.id === "d-hero-expired");
+    if (!heroInActive) {
+      pass("Hero override: expired hero is correctly excluded from activeDrops");
+    } else {
+      fail("Hero override: activeDrops shouldn't include expired hero", "isActiveDrop returned true for past cutoff");
+    }
+  }
+
+  // 17g3: When no admin hero exists, selection falls back to auto-pick.
+  {
+    const drops = [
+      makeDrop("d-a", "2099-12-01", "17:00", 5),
+      makeDrop("d-b", "2099-12-02", "17:00", 5),
+    ];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { "d-a": 3, "d-b": 3 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const featured = selectFeatured(drops, active, spots);
+    if (featured?.id === "d-a") {
+      pass("Hero override: no admin hero → auto-pick earliest cutoff");
+    } else {
+      fail("Hero override: no admin hero fallback", `featured=${featured?.id} (expected d-a)`);
+    }
+  }
+
+  // 17g4: Cancelled status suppresses hero override (admin removed status,
+  //       not the hero flag — still shouldn't be shown).
+  {
+    const drops = [
+      makeDrop("d-cancelled-hero", "2099-12-01", "17:00", 5, "cancelled", { is_hero: true }),
+      makeDrop("d-active", "2099-12-02", "17:00", 5),
+    ];
+    const now = new Date("2099-01-01T00:00:00").getTime();
+    const spots = { "d-cancelled-hero": 5, "d-active": 5 };
+    const active = drops.filter(d => isActiveDrop(d, spots[d.id], now));
+    const featured = selectFeatured(drops, active, spots);
+    if (featured?.id === "d-active") {
+      pass("Hero override: cancelled hero suppressed, falls back to auto-pick");
+    } else {
+      fail("Hero override: cancelled hero suppressed", `featured=${featured?.id} (expected d-active)`);
     }
   }
 
@@ -1921,28 +2008,45 @@ async function testTimeHelpers() {
     const end = new Date(item.end_time_iso).getTime();
     return now >= end;
   }
-  function formatTimeWindow(item) {
-    const fmt = (t) => {
-      const [h] = t.split(":").map(Number);
-      const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-      const ampm = h >= 12 ? "PM" : "AM";
-      return { hour12, ampm };
+  // Mirror of the post-fix formatTimeWindow: reads *_iso and projects
+  // into America/Chicago via Intl.DateTimeFormat. Independent of the
+  // test runner's local TZ, simulating Vercel UTC vs DFW local.
+  const DISPLAY_TZ = "America/Chicago";
+  function centralHM(iso) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: DISPLAY_TZ,
+      hour: "numeric", minute: "numeric", hour12: true,
+    }).formatToParts(new Date(iso));
+    return {
+      hour: Number(parts.find((p) => p.type === "hour")?.value ?? "12"),
+      minute: Number(parts.find((p) => p.type === "minute")?.value ?? "0"),
+      ampm: (parts.find((p) => p.type === "dayPeriod")?.value ?? "AM").toUpperCase(),
     };
-    const s = fmt(item.start_time);
-    const e = fmt(item.end_time);
+  }
+  function formatTimeWindow(item) {
+    const s = centralHM(item.start_time_iso);
+    const e = centralHM(item.end_time_iso);
+    const side = (hm) => hm.minute === 0 ? `${hm.hour}` : `${hm.hour}:${String(hm.minute).padStart(2, "0")}`;
     return s.ampm === e.ampm
-      ? `${s.hour12}–${e.hour12} ${e.ampm}`
-      : `${s.hour12} ${s.ampm}–${e.hour12} ${e.ampm}`;
+      ? `${side(s)}–${side(e)} ${e.ampm}`
+      : `${side(s)} ${s.ampm}–${side(e)} ${e.ampm}`;
+  }
+  function formatDate(item) {
+    return new Date(item.start_time_iso).toLocaleDateString("en-US", {
+      weekday: "long", month: "short", day: "numeric", timeZone: DISPLAY_TZ,
+    });
   }
 
   // The midnight-straddling drop from the diagnosis.
+  // 2026-04-22T23:00Z = 2026-04-22 18:00 CT (DST → CDT, UTC-5).
+  // 2026-04-23T00:00Z = 2026-04-22 19:00 CT.
   const crosses = {
     id: "tz-crosses-midnight",
     status: "live",
     start_time_iso: "2026-04-22T23:00:00Z",
     end_time_iso: "2026-04-23T00:00:00Z",
-    // Intentionally WRONG display fields — the old code-path would
-    // use these. The new helpers must ignore them.
+    // These display fields are intentionally wrong; the new helpers
+    // must ignore them and read the *_iso fields instead.
     date: "2026-04-22",
     start_time: "23:00",
     end_time: "00:00",
@@ -1971,27 +2075,68 @@ async function testTimeHelpers() {
     }
   }
 
-  // 3) formatTimeWindow: hour 0 → "12 AM" (the bug was "0 AM");
-  //    hour 12 → "12 PM". The shared-AM/PM format elides the first
-  //    period when both endpoints are in the same half.
+  // 3) formatTimeWindow: now reads *_iso fields and projects into
+  //    Central time. These cases pick UTC instants whose CT projection
+  //    exercises hour-0 (12 AM), hour-12 (12 PM), and the midnight
+  //    crossover. All independent of runner TZ.
   {
-    const midnight = formatTimeWindow({ start_time: "00:00", end_time: "01:00" });
-    const noon = formatTimeWindow({ start_time: "11:00", end_time: "12:00" });
-    const midSpan = formatTimeWindow({ start_time: "23:00", end_time: "00:00" });
+    // 2026-01-15T06:00Z = 2026-01-15 00:00 CT (CST, UTC-6) → "12 AM"
+    const midnight = formatTimeWindow({
+      start_time_iso: "2026-01-15T06:00:00Z",
+      end_time_iso: "2026-01-15T07:00:00Z",
+    });
+    // 2026-01-15T17:00Z = 2026-01-15 11:00 CT → "11 AM";
+    // 2026-01-15T18:00Z = 2026-01-15 12:00 CT → "12 PM"
+    const noon = formatTimeWindow({
+      start_time_iso: "2026-01-15T17:00:00Z",
+      end_time_iso: "2026-01-15T18:00:00Z",
+    });
+    // 2026-01-16T05:00Z = 2026-01-15 23:00 CT → "11 PM";
+    // 2026-01-16T06:00Z = 2026-01-16 00:00 CT → "12 AM"
+    const midSpan = formatTimeWindow({
+      start_time_iso: "2026-01-16T05:00:00Z",
+      end_time_iso: "2026-01-16T06:00:00Z",
+    });
     if (midnight === "12–1 AM") {
-      pass("TZ: formatTimeWindow hour 0 renders as 12 (AM)");
+      pass("TZ: formatTimeWindow midnight (CT) renders as 12 AM");
     } else {
-      fail("TZ: formatTimeWindow hour 0", `got "${midnight}", expected "12–1 AM"`);
+      fail("TZ: formatTimeWindow midnight (CT)", `got "${midnight}", expected "12–1 AM"`);
     }
     if (noon === "11 AM–12 PM") {
-      pass("TZ: formatTimeWindow hour 12 renders as 12 PM");
+      pass("TZ: formatTimeWindow noon (CT) renders as 12 PM");
     } else {
-      fail("TZ: formatTimeWindow hour 12", `got "${noon}", expected "11 AM–12 PM"`);
+      fail("TZ: formatTimeWindow noon (CT)", `got "${noon}", expected "11 AM–12 PM"`);
     }
     if (midSpan === "11 PM–12 AM") {
-      pass("TZ: formatTimeWindow midnight crossover → 11 PM–12 AM (not '0 AM')");
+      pass("TZ: formatTimeWindow midnight crossover (CT) → 11 PM–12 AM");
     } else {
-      fail("TZ: formatTimeWindow midnight crossover", `got "${midSpan}", expected "11 PM–12 AM"`);
+      fail("TZ: formatTimeWindow midnight crossover (CT)", `got "${midSpan}", expected "11 PM–12 AM"`);
+    }
+  }
+
+  // 3b) UTC-server simulation — the exact biryani bug from production.
+  //     Drop at start_time_iso = 2026-05-15T00:00Z (UTC midnight).
+  //     On a UTC server, the old code projected this to "00:00" wall-
+  //     clock and rendered "12–2 AM Friday May 15". With the fix, the
+  //     helpers read the iso instant and project to CT (UTC-5 in DST),
+  //     yielding "7–9 PM Thursday May 14". This test is the contract
+  //     pin against re-introducing the server-TZ-dependent regression.
+  {
+    const drop = {
+      start_time_iso: "2026-05-15T00:00:00Z",
+      end_time_iso: "2026-05-15T02:00:00Z",
+    };
+    const tw = formatTimeWindow(drop);
+    const dt = formatDate(drop);
+    if (tw === "7–9 PM") {
+      pass("TZ: UTC-midnight drop renders as 7–9 PM in Central");
+    } else {
+      fail("TZ: UTC-midnight time render", `got "${tw}", expected "7–9 PM"`);
+    }
+    if (dt === "Thursday, May 14") {
+      pass("TZ: UTC-midnight drop renders date as Thursday May 14 in Central");
+    } else {
+      fail("TZ: UTC-midnight date render", `got "${dt}", expected "Thursday, May 14"`);
     }
   }
 
@@ -2016,6 +2161,105 @@ async function testTimeHelpers() {
       pass("TZ: at 00:01Z next day — hasEnded=true, isPickupInProgress=false");
     } else {
       fail("TZ: at 00:01Z next day", `hasEnded=${hasEnded(crosses, after)}, pip=${isPickupInProgress(crosses, after)}`);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 17c: Distance guards — null coords must not render a fake pill
+// Mirrors the logic in lib/hooks/useUserLocation.ts and the
+// "📍 {address} · {distance}" guard in components/DropsSection.tsx.
+// ═══════════════════════════════════════════════════════════════════════
+async function testDistanceGuards() {
+  console.log("\n── Test 17c: Distance Guards ──");
+
+  // Pure JS copy of haversine + getDistance — contract pin.
+  function haversine(lat1, lng1, lat2, lng2) {
+    const R = 3958.8;
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round(R * c * 10) / 10;
+  }
+  function getDistance(coords, itemLat, itemLng) {
+    if (!coords) return null;
+    if (itemLat === null || itemLng === null) return null;
+    return `${haversine(coords.lat, coords.lng, itemLat, itemLng)} mi away`;
+  }
+
+  const friscoCoords = { lat: 33.13, lng: -96.77 };
+
+  // 1) Both lat AND lng null → no distance pill.
+  if (getDistance(friscoCoords, null, null) === null) {
+    pass("Distance: null lat+lng → no pill");
+  } else {
+    fail("Distance: null lat+lng", `expected null, got "${getDistance(friscoCoords, null, null)}"`);
+  }
+
+  // 2) Either coord null → no distance pill (defense against half-populated rows).
+  if (getDistance(friscoCoords, 33.13, null) === null && getDistance(friscoCoords, null, -96.77) === null) {
+    pass("Distance: half-null coords → no pill");
+  } else {
+    fail("Distance: half-null coords", "should return null when either coord is null");
+  }
+
+  // 3) No user coords (geolocation denied / not requested) → no pill.
+  if (getDistance(null, 33.13, -96.77) === null) {
+    pass("Distance: missing user coords → no pill");
+  } else {
+    fail("Distance: missing user coords", "should return null when coords are unknown");
+  }
+
+  // 4) Real coords → real distance. Frisco→Frisco ≈ 0.
+  {
+    const d = getDistance(friscoCoords, 33.13, -96.77);
+    if (d === "0 mi away") {
+      pass("Distance: real coords → real distance");
+    } else {
+      fail("Distance: real coords", `expected "0 mi away", got "${d}"`);
+    }
+  }
+
+  // 5) Regression pin for the (0,0) Gulf-of-Guinea bug: if the mapper
+  //    accidentally re-introduces null→0 coercion, the haversine would
+  //    return ~6620 mi from Frisco. That's the symptom we're guarding
+  //    against. With null surfacing, the pill never renders for these.
+  {
+    const d = getDistance(friscoCoords, 0, 0);
+    // (0,0) is a valid coordinate; haversine returns ~6620. The fix is
+    // upstream (mapper surfaces null, not 0), so this pure-math check
+    // documents the failure mode the upstream fix prevents.
+    if (typeof d === "string" && d.includes("66") && d.includes("mi away")) {
+      pass("Distance: (0,0) sentinel would render ~6620 mi — mapper null-passthrough is the fix");
+    } else {
+      fail("Distance: (0,0) symptom", `expected ~6620 mi pill, got "${d}"`);
+    }
+  }
+
+  // 6) Address pill render guard — mirrors the DropsSection JSX.
+  //    The "📍 {address}{address && distance ? ' · ' : ''}{distance ?? ''}"
+  //    line should not render at all when both are null.
+  {
+    const render = (address, distance) => {
+      if (!address && !distance) return null;
+      return `📍 ${address ?? ""}${address && distance ? " · " : ""}${distance ?? ""}`;
+    };
+    if (render(null, null) === null) {
+      pass("Address pill: hidden when both address and distance are null");
+    } else {
+      fail("Address pill: both null", `expected null render, got "${render(null, null)}"`);
+    }
+    if (render("123 Main St", null) === "📍 123 Main St") {
+      pass("Address pill: address only renders without distance suffix");
+    } else {
+      fail("Address pill: address only", `got "${render("123 Main St", null)}"`);
+    }
+    if (render("123 Main St", "1.2 mi away") === "📍 123 Main St · 1.2 mi away") {
+      pass("Address pill: address + distance renders with separator");
+    } else {
+      fail("Address pill: address + distance", `got "${render("123 Main St", "1.2 mi away")}"`);
     }
   }
 }
