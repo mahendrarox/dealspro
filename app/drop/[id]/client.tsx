@@ -174,6 +174,9 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
         fontFamily: T.display,
         display: "flex",
         justifyContent: "center",
+        alignItems: "flex-start",
+        padding: "16px 16px 96px",
+        boxSizing: "border-box",
         WebkitTextSizeAdjust: "100%",
       }}
     >
@@ -201,14 +204,16 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
         </div>
       )}
 
-      {/* ── Centered column ── */}
+      {/* ── Contained card — matches homepage DropCard treatment ── */}
       <div
         style={{
           width: "100%",
           maxWidth: "480px",
           background: T.card,
-          minHeight: "100vh",
-          paddingBottom: "104px", // clearance for the fixed CTA bar
+          borderRadius: "16px",
+          border: "1px solid #E4E4E7",
+          boxShadow: "0 4px 20px rgba(249,58,37,0.12)",
+          overflow: "hidden",
           position: "relative",
         }}
       >
@@ -444,14 +449,13 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
         )}
       </div>
 
-      {/* ── 6b. STICKY CTA ── */}
+      {/* ── 6b. STICKY CTA — floats aligned to the card's side gutters ── */}
       <div
         style={{
-          position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
-          width: "100%", maxWidth: "480px", zIndex: 100,
-          background: T.card, borderTop: `1px solid ${T.divider}`,
-          padding: "12px 16px calc(12px + env(safe-area-inset-bottom))",
-          boxShadow: "0 -6px 24px rgba(0,0,0,0.18)",
+          position: "fixed",
+          bottom: "calc(16px + env(safe-area-inset-bottom))",
+          left: "50%", transform: "translateX(-50%)",
+          width: "calc(100% - 32px)", maxWidth: "480px", zIndex: 100,
         }}
       >
         <button
