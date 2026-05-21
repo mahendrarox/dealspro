@@ -6,7 +6,6 @@ import {
   formatTimeWindow,
   formatDate,
   getDiscountPct,
-  getSavings,
   canPurchase,
   isPickupInProgress,
   hasEnded,
@@ -22,10 +21,8 @@ const T = {
   text: "#111827",
   textMuted: "#6B7280",
   textDim: "#9CA3AF",
-  green: "#16A34A",
   greenBg: "#ECFDF5",
   greenFg: "#059669",
-  amber: "#D97706",
   divider: "#E5E7EB",
   display: "'DM Sans', -apple-system, 'Segoe UI', sans-serif",
   mono: "'JetBrains Mono', 'SF Mono', monospace",
@@ -40,13 +37,6 @@ function buildDirectionsUrl(item: DropItem): string | null {
   }
   return null;
 }
-
-const HOW_IT_WORKS: { icon: string; label: string }[] = [
-  { icon: "💳", label: "Claim & pay" },
-  { icon: "🎟️", label: "Get your QR ticket" },
-  { icon: "📲", label: "Show QR at pickup" },
-  { icon: "🍽️", label: "Enjoy your meal" },
-];
 
 export default function DealClient({ initialItem }: { initialItem: DropItem }) {
   const item = initialItem;
@@ -104,20 +94,13 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
   const cancelled = item.status === "cancelled";
   const disabled = !canPurchase(item) || sold || ended || pickupActive || cancelled;
   const pct = getDiscountPct(item);
-  const savings = getSavings(item);
-  const hasDiscount = item.original_price > item.price && savings > 0;
+  const hasDiscount = item.original_price > item.price;
   const hasImage = !!item.image_url;
-  const verified = !cancelled && item.status === "live";
 
   const spotsTotal = item.total_spots;
   const fillPct = spotsTotal > 0 ? (claimed / spotsTotal) * 100 : 100;
   const urgent = !sold && remaining <= 3;
-
-  let scarcityText = "";
-  if (sold) scarcityText = "Sold out";
-  else if (remaining === 1) scarcityText = `🔥 Only 1 of ${spotsTotal} left · last spot`;
-  else if (urgent) scarcityText = `🔥 Only ${remaining} of ${spotsTotal} left · going fast`;
-  else scarcityText = `${remaining} of ${spotsTotal} spots left`;
+  const scarcityText = sold ? "Sold out" : `🔥 Only ${remaining} left`;
 
   // ── Quantity bounds: cap at min(4, spots_remaining); 1 minimum ──
   const maxQty = Math.max(1, Math.min(4, remaining));
@@ -173,7 +156,6 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           ? `Claim for $${total}`
           : `Claim ${quantity} spots for $${total}`;
 
-  // ── Reusable styles ──
   const bandLabel: CSSProperties = {
     fontFamily: T.mono,
     fontSize: "11px",
@@ -270,50 +252,32 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           <div
             style={{
               position: "absolute", inset: 0,
-              background: "linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.35) 38%, transparent 65%)",
+              background: "linear-gradient(0deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.35) 42%, transparent 68%)",
               pointerEvents: "none",
             }}
           />
-          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "18px 18px 16px", zIndex: 2 }}>
-            <div style={{ fontSize: "20px", fontWeight: 800, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.02em" }}>
+          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "20px 20px 18px", zIndex: 2 }}>
+            <div style={{ fontSize: "24px", fontWeight: 800, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.02em" }}>
               {item.title}
             </div>
           </div>
         </div>
 
-        {/* ── 2. RED HERO BAND ── */}
-        <div
-          style={{
-            background: "linear-gradient(145deg, #F93A25 0%, #E8301A 50%, #D42A16 100%)",
-            padding: "22px 22px 24px",
-            color: "#fff",
-          }}
-        >
-          <div style={{ fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.15 }}>
-            {item.title}
-          </div>
-          {hasDiscount && (
-            <div style={{ fontSize: "16px", fontWeight: 700, marginTop: "8px" }}>
-              🔥 You save ${savings.toFixed(2)}
-            </div>
-          )}
-        </div>
-
-        {/* ── White content section ── */}
-        <div style={{ padding: "22px", display: "flex", flexDirection: "column", gap: "22px" }}>
-          {/* ── 3. PRICE BLOCK ── */}
+        {/* ── White content: price + scarcity ── */}
+        <div style={{ padding: "22px", display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* ── 2. PRICE + SAVINGS ── */}
           <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "10px" }}>
-            <span style={{ fontFamily: T.mono, fontSize: "34px", fontWeight: 800, color: T.text, letterSpacing: "-0.02em", lineHeight: 1 }}>
+            <span style={{ fontFamily: T.mono, fontSize: "38px", fontWeight: 800, color: T.text, letterSpacing: "-0.02em", lineHeight: 1 }}>
               ${item.price.toFixed(2)}
             </span>
             {hasDiscount && (
               <>
-                <span style={{ fontFamily: T.mono, fontSize: "17px", fontWeight: 500, color: T.textDim, textDecoration: "line-through" }}>
+                <span style={{ fontFamily: T.mono, fontSize: "18px", fontWeight: 500, color: T.textDim, textDecoration: "line-through" }}>
                   ${item.original_price.toFixed(2)}
                 </span>
                 <span style={{
-                  fontSize: "12px", fontWeight: 800, color: T.greenFg, background: T.greenBg,
-                  padding: "4px 9px", borderRadius: "6px", letterSpacing: "0.02em",
+                  fontSize: "13px", fontWeight: 800, color: T.greenFg, background: T.greenBg,
+                  padding: "4px 10px", borderRadius: "6px", letterSpacing: "0.02em",
                 }}>
                   {pct}% OFF
                 </span>
@@ -321,11 +285,11 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
             )}
           </div>
 
-          {/* ── 4. SCARCITY BAR ── */}
+          {/* ── 3. SCARCITY BAR ── */}
           <div>
             <div style={{
-              fontSize: "13px", fontWeight: 700,
-              color: sold ? T.red : urgent ? T.amber : T.textMuted,
+              fontSize: "14px", fontWeight: 800,
+              color: sold ? T.red : urgent ? T.red : T.textMuted,
               marginBottom: "7px",
             }}>
               {scarcityText}
@@ -365,7 +329,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
                 style={{
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                   width: "28px", height: "28px", borderRadius: "9999px",
-                  background: "#DCFCE7", color: T.green, fontSize: "16px", fontWeight: 800,
+                  background: "#DCFCE7", color: T.greenFg, fontSize: "16px", fontWeight: 800,
                 }}
               >
                 ✓
@@ -375,12 +339,12 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           )}
         </div>
 
-        {/* ── 5. DARK PICKUP BAND ── */}
+        {/* ── 4. DARK PICKUP BAND ── */}
         <div style={{ background: T.dark, padding: "24px 22px", color: "#fff" }}>
           <div className="dp-when-where">
             {/* WHEN */}
             <div>
-              <div style={bandLabel}>When:</div>
+              <div style={bandLabel}>When</div>
               <div style={{ fontSize: "15px", fontWeight: 700, color: "#fff", marginBottom: "4px" }}>
                 {dayDate}
               </div>
@@ -391,7 +355,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
 
             {/* WHERE */}
             <div>
-              <div style={bandLabel}>Where:</div>
+              <div style={bandLabel}>Where</div>
               <div style={{ fontSize: "15px", fontWeight: 700, color: "#fff", marginBottom: "4px" }}>
                 {item.restaurant_name}
               </div>
@@ -422,59 +386,18 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           </div>
         </div>
 
-        {/* ── 6. HOW IT WORKS STRIP ── */}
-        <div style={{ padding: "22px", background: T.card }}>
-          <div style={bandLabel}>How it works</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginTop: "4px" }}>
-            {HOW_IT_WORKS.map((step, i) => (
-              <div key={i} style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
-                <div style={{
-                  width: "40px", height: "40px", borderRadius: "12px",
-                  background: "#F3F4F6", display: "flex", alignItems: "center",
-                  justifyContent: "center", fontSize: "18px",
-                }}>
-                  {step.icon}
-                </div>
-                <div style={{ fontSize: "11px", fontWeight: 600, color: T.textMuted, lineHeight: 1.3 }}>
-                  {step.label}
-                </div>
-              </div>
-            ))}
-          </div>
+        {/* ── 5. ONE-LINE REASSURANCE ── */}
+        <div style={{
+          padding: "14px 22px", textAlign: "center",
+          fontSize: "12.5px", fontWeight: 600, color: T.textMuted,
+          borderBottom: `1px solid ${T.divider}`,
+        }}>
+          Prepaid · We text your QR · Show it at pickup
         </div>
 
-        {/* ── 7. TRUST SIGNALS ── */}
-        <div style={{ padding: "0 22px 22px", background: T.card }}>
-          <div style={{
-            border: `1px solid ${T.divider}`, borderRadius: "14px", padding: "16px 18px",
-            display: "flex", flexDirection: "column", gap: "8px",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "15px", fontWeight: 800, color: T.text }}>
-                {item.restaurant_name}
-              </span>
-              {verified && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: "4px",
-                  fontSize: "11px", fontWeight: 700, color: T.greenFg,
-                  background: T.greenBg, padding: "3px 8px", borderRadius: "9999px",
-                }}>
-                  ✓ Verified partner
-                </span>
-              )}
-            </div>
-            {item.address && (
-              <div style={{ fontSize: "13px", color: T.textMuted }}>{item.address}</div>
-            )}
-            <div style={{ fontSize: "12px", color: T.textDim, fontWeight: 500 }}>
-              Prepaid · No surprises · Show your phone at pickup
-            </div>
-          </div>
-        </div>
-
-        {/* ── 8. QUANTITY SELECTOR ── */}
+        {/* ── 6a. QUANTITY SELECTOR ── */}
         {!disabled && (
-          <div style={{ padding: "0 22px 22px", background: T.card }}>
+          <div style={{ padding: "18px 22px" }}>
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "space-between",
               padding: "14px 16px", border: `1px solid ${T.divider}`, borderRadius: "14px",
@@ -521,7 +444,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
         )}
       </div>
 
-      {/* ── 9. STICKY CTA ── */}
+      {/* ── 6b. STICKY CTA ── */}
       <div
         style={{
           position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
