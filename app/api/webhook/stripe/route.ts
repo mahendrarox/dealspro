@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { supabase } from "@/lib/supabase";
 import { formatTimeWindow } from "@/lib/drops/helpers";
 import { getDropByIdForServer } from "@/lib/drops/db";
+import { normalizePhone } from "@/lib/phone";
 import { randomUUID } from "crypto";
 
 // ── Lazy Stripe init — prevents crash if env var missing at module load ──
@@ -84,7 +85,17 @@ export async function POST(request: NextRequest) {
     });
 
     // ── Extract metadata ──
-    const phone = session.metadata?.phone;
+    // Phone source: prefer the value the app attached (opted-in fast path),
+    // fall back to what Stripe collected during checkout (cold visitors).
+    // We guard each call so normalizePhone only ever receives a real string;
+    // the first valid number wins, otherwise phone is null.
+    const metaPhone = session.metadata?.phone
+      ? normalizePhone(session.metadata.phone)
+      : "";
+    const detailsPhone = session.customer_details?.phone
+      ? normalizePhone(session.customer_details.phone)
+      : "";
+    const phone = metaPhone || detailsPhone || null;
     const dropItemId = session.metadata?.drop_item_id;
     const quantity = parseInt(session.metadata?.quantity || "1") || 1;
 
@@ -97,10 +108,13 @@ export async function POST(request: NextRequest) {
     });
 
     if (!phone || !dropItemId) {
-      log("webhook_error", {
-        error: "Missing phone or drop_item_id in metadata",
+      log("webhook.phone_missing", {
+        error: "No usable phone or drop_item_id for this session",
         stripe_session_id: stripeSessionId,
-        metadata: session.metadata,
+        stripe_event_id: event.id,
+        metadata_phone_present: !!session.metadata?.phone,
+        customer_details_phone_present: !!session.customer_details?.phone,
+        drop_item_id_present: !!dropItemId,
       });
       return new Response("ok", { status: 200 });
     }
@@ -236,7 +250,42 @@ export async function POST(request: NextRequest) {
       qr_token: rpcResult.qr_token,
     });
 
+    // ── Ensure a subscriber row exists for this phone ──────────────────
+    // Every paid order must have an associated user so the ticket SMS can
+    // always be sent — including cold buyers who never opted in. We upsert
+    // with ignoreDuplicates so an existing subscriber's consent value is
+    // preserved untouched (consent handling is intentionally out of scope
+    // for this change). New rows are created with consent=false.
+    try {
+      const { error: userUpsertErr } = await supabase
+        .from("users")
+        .upsert(
+          {
+            phone,
+            name: session.customer_details?.name || null,
+            consent: false,
+          },
+          { onConflict: "phone", ignoreDuplicates: true },
+        );
+      if (userUpsertErr) {
+        log("user_upsert_failed", {
+          phone,
+          stripe_session_id: stripeSessionId,
+          error: userUpsertErr.message,
+        });
+      }
+    } catch (userErr) {
+      log("user_upsert_failed", {
+        phone,
+        stripe_session_id: stripeSessionId,
+        error: userErr instanceof Error ? userErr.message : String(userErr),
+      });
+    }
+
     // ── SMS notification (best-effort, lazy Twilio init) ──
+    // Sent for newly-created orders only: this block lives after the
+    // duplicate/oversold early-returns, so a retried webhook (RPC →
+    // "duplicate") never reaches here and cannot re-send the ticket.
     try {
       const twilioSid = process.env.TWILIO_ACCOUNT_SID;
       const twilioToken = process.env.TWILIO_AUTH_TOKEN;
@@ -247,33 +296,23 @@ export async function POST(request: NextRequest) {
         const twilio = (await import("twilio")).default;
         const twilioClient = twilio(twilioSid, twilioToken);
 
-        const { data: user } = await supabase
-          .from("users")
-          .select("phone")
-          .eq("phone", phone)
-          .maybeSingle();
+        const usedQrToken = rpcResult.qr_token || qrToken;
+        const dealCardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/ticket/${usedQrToken}`;
+        const qtyLabel = quantity > 1 ? `${quantity}x ` : "";
+        const smsBody =
+          `🎉 Your DealsPro deal card is confirmed!\n\n` +
+          `${qtyLabel}${item.title} — ${item.restaurant_name}\n` +
+          `📅 ${item.date} · ${formatTimeWindow(item)}\n` +
+          `💳 Paid: $${pricePaid.toFixed(2)}\n\n` +
+          `Show your deal card at the restaurant:\n${dealCardUrl}\n\n` +
+          `Reply STOP to unsubscribe.`;
 
-        if (user) {
-          const usedQrToken = rpcResult.qr_token || qrToken;
-          const dealCardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/ticket/${usedQrToken}`;
-          const qtyLabel = quantity > 1 ? `${quantity}x ` : "";
-          const smsBody =
-            `🎉 Your DealsPro deal card is confirmed!\n\n` +
-            `${qtyLabel}${item.title} — ${item.restaurant_name}\n` +
-            `📅 ${item.date} · ${formatTimeWindow(item)}\n` +
-            `💳 Paid: $${pricePaid.toFixed(2)}\n\n` +
-            `Show your deal card at the restaurant:\n${dealCardUrl}\n\n` +
-            `Reply STOP to unsubscribe.`;
-
-          const msg = await twilioClient.messages.create({
-            body: smsBody,
-            from: twilioPhone,
-            to: phone,
-          });
-          log("sms_sent", { drop_item_id: dropItemId, phone, sid: msg.sid });
-        } else {
-          log("sms_skipped", { reason: "User not found in users table", phone });
-        }
+        const msg = await twilioClient.messages.create({
+          body: smsBody,
+          from: twilioPhone,
+          to: phone,
+        });
+        log("sms_sent", { drop_item_id: dropItemId, phone, sid: msg.sid });
       } else {
         log("sms_skipped", { reason: "Twilio env vars not configured" });
       }

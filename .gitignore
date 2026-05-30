@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local Claude Code artifacts (per-machine; never commit)
+.claude/settings.local.json
+.claude/worktrees/

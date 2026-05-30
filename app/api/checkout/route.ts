@@ -66,42 +66,47 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Normalize phone
-    if (!rawPhone) {
-      return NextResponse.json({ error: "Phone number required" }, { status: 400 });
-    }
-    const phone = normalizePhone(rawPhone);
+    // Phone is optional at the API layer. Opted-in visitors arrive with a
+    // phone (from localStorage); cold visitors arrive with none and let
+    // Stripe Checkout collect it, after which the webhook reads it from
+    // customer_details.
+    const phone = rawPhone ? normalizePhone(rawPhone) : null;
 
-    // Duplicate check — block on ANY prior order (paid or pending) but
-    // surface only the paid-spot count to the user so a pending/failed
-    // row doesn't inflate the "you already have N spots" message.
-    const { data: priorOrders } = await supabase
-      .from("orders")
-      .select("status, quantity")
-      .eq("phone", phone)
-      .eq("drop_item_id", drop_item_id);
+    // The duplicate pre-check is only possible when the phone is known up
+    // front. Cold checkouts (phone collected by Stripe) rely on the
+    // uq_phone_drop_item index + create_order_atomic RPC to reject repeats.
+    if (phone) {
+      // Block on ANY prior order (paid or pending) but surface only the
+      // paid-spot count so a pending/failed row doesn't inflate the
+      // "you already have N spots" message.
+      const { data: priorOrders } = await supabase
+        .from("orders")
+        .select("status, quantity")
+        .eq("phone", phone)
+        .eq("drop_item_id", drop_item_id);
 
-    if (priorOrders && priorOrders.length > 0) {
-      const paidOrders = priorOrders.filter((o) => o.status === CONFIRMED_STATUS);
-      const existingQuantity = paidOrders.reduce(
-        (sum, o) => sum + (Number(o.quantity) || 0),
-        0,
-      );
-      const spotWord = existingQuantity === 1 ? "spot is" : "spots are";
-      const message =
-        existingQuantity > 0
-          ? `You're all set — your ${existingQuantity} ${spotWord} confirmed for ${dbRow.title}. 🎉\n\nEach person can claim once per drop. Want more spots? Share this deal with friends — they can claim using their own number.`
-          : `You've already started a claim for ${dbRow.title}. We're still confirming your payment — please check back in a moment.\n\nEach person can claim once per drop.`;
+      if (priorOrders && priorOrders.length > 0) {
+        const paidOrders = priorOrders.filter((o) => o.status === CONFIRMED_STATUS);
+        const existingQuantity = paidOrders.reduce(
+          (sum, o) => sum + (Number(o.quantity) || 0),
+          0,
+        );
+        const spotWord = existingQuantity === 1 ? "spot is" : "spots are";
+        const message =
+          existingQuantity > 0
+            ? `You're all set — your ${existingQuantity} ${spotWord} confirmed for ${dbRow.title}. 🎉\n\nEach person can claim once per drop. Want more spots? Share this deal with friends — they can claim using their own number.`
+            : `You've already started a claim for ${dbRow.title}. We're still confirming your payment — please check back in a moment.\n\nEach person can claim once per drop.`;
 
-      return NextResponse.json(
-        {
-          error: "already_claimed",
-          message,
-          existingQuantity,
-          dropTitle: dbRow.title,
-        },
-        { status: 409 },
-      );
+        return NextResponse.json(
+          {
+            error: "already_claimed",
+            message,
+            existingQuantity,
+            dropTitle: dbRow.title,
+          },
+          { status: 409 },
+        );
+      }
     }
 
     // Server-side price: DB is authoritative.
@@ -127,8 +132,12 @@ export async function POST(request: NextRequest) {
           quantity,
         },
       ],
+      // Cold visitors have no phone yet — let Stripe collect it. Opted-in
+      // visitors already supplied one, so skip the prompt for a faster flow.
+      ...(phone ? {} : { phone_number_collection: { enabled: true } }),
       metadata: {
-        phone,
+        // Only attach phone when known; never pass an empty string.
+        ...(phone ? { phone } : {}),
         drop_item_id,
         quantity: String(quantity),
         date: item.date,
