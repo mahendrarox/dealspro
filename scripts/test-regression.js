@@ -1413,6 +1413,7 @@ async function main() {
     await testCanaryQty2();
     await testPhoneCapture();
     await testPr1ColdUserCheckout();
+    await testPr2ConsentHonesty();
     await testPhoneSearch();
     await testDropEdgeCases();
     await testTimeHelpers();
@@ -1888,6 +1889,133 @@ async function testPr1ColdUserCheckout() {
     await supabase.from("orders").delete().in("phone", allTestPhones);
     await supabase.from("users").delete().in("phone", allTestPhones);
     await supabase.from("drop_items").delete().eq("id", dropId);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 15c: PR 2 — Consent honesty (client transmits real optIn; server
+// stores strict boolean)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testPr2ConsentHonesty() {
+  console.log("\n── Test 15c: PR 2 Consent Honesty ──");
+
+  // #1 + #2: the homepage must transmit the live `optIn` state, not a
+  // hardcoded `true`. There is no React/jsdom harness here, so verify the
+  // POST-body construction by source inspection: the body must reference the
+  // bare `optIn` variable (shorthand) and must NOT hardcode `optIn: true`.
+  try {
+    const fs = require("fs");
+    const src = fs.readFileSync(path.resolve(__dirname, "..", "components", "Homepage.tsx"), "utf8");
+    const hardcoded = /optIn\s*:\s*true/.test(src);
+    const usesVariable = /,\s*optIn\s*\}/.test(src);
+    if (!hardcoded && usesVariable) {
+      pass("PR2 #1: homepage sends the real optIn (true when checked) — not hardcoded");
+      pass("PR2 #2: homepage would send optIn:false when unchecked — live variable, not hardcoded");
+    } else {
+      fail("PR2 #1/#2: homepage consent transmission", `hardcoded=${hardcoded}, usesVariable=${usesVariable}`);
+    }
+  } catch (err) {
+    fail("PR2 #1/#2: homepage source check", err.message);
+  }
+
+  if (!infra.lead) {
+    ["#3", "#4", "#5", "#6", "#7"].forEach((n) => skip(`PR2 ${n}`, "/api/lead not available"));
+    return;
+  }
+
+  const supabase = getSupabase();
+  // Unique controlled phones per case so the upsert-by-phone never lets one
+  // case overwrite another. All cleaned up in finally.
+  const phones = {
+    t: "+13205550031",
+    f: "+13205550032",
+    miss: "+13205550033",
+    sTrue: "+13205550034",
+    sFalse: "+13205550035",
+    one: "+13205550036",
+    zero: "+13205550037",
+    nul: "+13205550038",
+    obj: "+13205550039",
+    arr: "+13205550040",
+  };
+  const allPhones = Object.values(phones);
+  await supabase.from("users").delete().in("phone", allPhones);
+
+  const postLead = (body) =>
+    fetchWithRetry(`${BASE_URL}/api/lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const readConsent = async (phone) => {
+    const { data } = await supabase.from("users").select("consent").eq("phone", phone).maybeSingle();
+    return data ? data.consent : undefined;
+  };
+
+  try {
+    // #3: optIn:true → consent true
+    {
+      const res = await postLead({ phone: phones.t, optIn: true });
+      const c = await readConsent(phones.t);
+      if (res.status === 200 && c === true) pass("PR2 #3: optIn:true → consent=true");
+      else fail("PR2 #3: optIn:true", `status=${res.status}, consent=${c}`);
+    }
+
+    // #4: optIn:false → consent false (phone-only so the full-form guard
+    // doesn't reject it; that guard is intentionally left intact).
+    {
+      const res = await postLead({ phone: phones.f, optIn: false });
+      const c = await readConsent(phones.f);
+      if (res.status === 200 && c === false) pass("PR2 #4: optIn:false → consent=false");
+      else fail("PR2 #4: optIn:false", `status=${res.status}, consent=${c}`);
+    }
+
+    // #5: missing optIn → consent false
+    {
+      const res = await postLead({ phone: phones.miss });
+      const c = await readConsent(phones.miss);
+      if (res.status === 200 && c === false) pass("PR2 #5: missing optIn → consent=false");
+      else fail("PR2 #5: missing optIn", `status=${res.status}, consent=${c}`);
+    }
+
+    // #6: every non-boolean optIn resolves to consent=false
+    const nonBool = [
+      ['"true"', phones.sTrue, "true"],
+      ['"false"', phones.sFalse, "false"],
+      ["1", phones.one, 1],
+      ["0", phones.zero, 0],
+      ["null", phones.nul, null],
+      ["object", phones.obj, { x: 1 }],
+      ["array", phones.arr, [1, 2]],
+    ];
+    let nbOk = 0;
+    for (const [label, phone, val] of nonBool) {
+      const res = await postLead({ phone, optIn: val });
+      const c = await readConsent(phone);
+      if (res.status === 200 && c === false) nbOk++;
+      else fail(`PR2 #6 (${label})`, `status=${res.status}, consent=${c}`);
+    }
+    if (nbOk === nonBool.length) {
+      pass(`PR2 #6: non-boolean optIn (${nonBool.length} variants) all → consent=false`);
+    }
+
+    // #7: existing validation behavior unchanged.
+    // (a) missing phone → 400.
+    {
+      const res = await postLead({ name: "No Phone", optIn: true });
+      if (res.status === 400) pass("PR2 #7a: missing phone → 400 (validation unchanged)");
+      else fail("PR2 #7a: missing phone", `Expected 400, got ${res.status}`);
+    }
+    // (b) full-form with name + optIn:false still → 400 (control flow intact;
+    //     only the consent assignment was hardened, not the form guard).
+    {
+      const res = await postLead({ name: "Full No Consent", phone: phones.t, optIn: false });
+      if (res.status === 400) pass("PR2 #7b: full form with optIn:false → 400 (guard unchanged)");
+      else fail("PR2 #7b: full-form optIn:false", `Expected 400, got ${res.status}`);
+    }
+  } finally {
+    await supabase.from("users").delete().in("phone", allPhones);
   }
 }
 

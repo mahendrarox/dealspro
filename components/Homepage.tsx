@@ -144,7 +144,7 @@ function CaptureForm({ dark }) {
       const res = await fetch("/api/lead", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), phone: `+1${digits}`, optIn: true }),
+        body: JSON.stringify({ name: name.trim(), phone: `+1${digits}`, optIn }),
       });
       const data = await res.json();
       if (data.success) {

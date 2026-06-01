@@ -31,12 +31,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
+  // Strict boolean: consent is true ONLY for a literal `true`. Every other
+  // value — missing, false, null, "true"/"false" strings, 1/0, objects —
+  // resolves to false. This prevents a truthy non-boolean (e.g. the string
+  // "false") from being stored as consent.
+  const consent = optIn === true;
+
   const upsertData: Record<string, unknown> = {
     phone: e164Phone,
     name: name?.trim() || "DealsPro User",
+    consent,
     updated_at: new Date().toISOString(),
   };
-  if (optIn !== undefined) upsertData.consent = optIn;
 
   const { data: user, error: userError } = await supabase
     .from("users")
