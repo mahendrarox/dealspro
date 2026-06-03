@@ -113,20 +113,93 @@ export const emptyDropForm = (now: Date = new Date()): DropCreateFormValues => {
   };
 };
 
-/** Convert a datetime-local input string (local tz) to ISO-8601 with timezone. */
-export function toIso(local: string): string {
-  if (!local) return "";
-  const d = new Date(local);
-  if (Number.isNaN(d.getTime())) return local;
-  return d.toISOString();
+// ─── Timezone: pinned to America/Chicago ─────────────────────────────
+//
+// Studio datetime-local inputs are entered as Dallas-area (Central) wall
+// clock. We convert Central ⇄ UTC explicitly so the stored instant never
+// depends on the admin's browser/device/server timezone. The offset is
+// derived from the IANA zone "America/Chicago" via Intl, so it stays
+// DST-correct (CDT/UTC−5 vs CST/UTC−6) without hardcoding −5/−6.
+//
+// MVP scope: a single pinned zone is intentional for the Dallas-area
+// pilot. Restaurant-specific timezones are deferred to a later PR.
+const STUDIO_TZ = "America/Chicago";
+
+/**
+ * Offset (ms) of `STUDIO_TZ` from UTC at the instant `date`, defined as
+ * wallClock − utc. Negative for Central (e.g. −5h CDT, −6h CST). DST-safe
+ * because it asks Intl for the zone's actual wall clock at that instant.
+ */
+function tzOffsetMs(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: STUDIO_TZ,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  // Some engines emit "24" for midnight; normalize to 0.
+  const hour = m.hour === "24" ? 0 : Number(m.hour);
+  const wallAsUtc = Date.UTC(
+    Number(m.year),
+    Number(m.month) - 1,
+    Number(m.day),
+    hour,
+    Number(m.minute),
+    Number(m.second),
+  );
+  return wallAsUtc - date.getTime();
 }
 
-/** Convert an ISO-8601 string to a datetime-local input value. */
+/**
+ * Convert a datetime-local input string (interpreted as America/Chicago
+ * wall clock) to a UTC ISO-8601 string. Does NOT rely on the host timezone.
+ */
+export function toIso(local: string): string {
+  if (!local) return "";
+  // Parse the wall-clock fields directly — never `new Date(local)`, which
+  // would interpret them in the host timezone.
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local);
+  if (!match) return local;
+  const [, y, mo, d, h, mi] = match;
+  const wallAsUtc = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+  // The UTC instant t satisfies: wallAsUtc = t + offset(t). Solve for t,
+  // re-checking the offset at the candidate instant to stay correct across
+  // DST boundaries (offset can differ between the guess and the answer).
+  let offset = tzOffsetMs(new Date(wallAsUtc));
+  let t = wallAsUtc - offset;
+  const offset2 = tzOffsetMs(new Date(t));
+  if (offset2 !== offset) t = wallAsUtc - offset2;
+  return new Date(t).toISOString();
+}
+
+/**
+ * Convert a stored UTC ISO-8601 string to a datetime-local input value
+ * expressed in America/Chicago wall clock. Does NOT rely on the host
+ * timezone.
+ */
 export function isoToLocal(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return localToInput(d);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: STUDIO_TZ,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(d);
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  const hour = m.hour === "24" ? "00" : m.hour;
+  return `${m.year}-${m.month}-${m.day}T${hour}:${m.minute}`;
 }
 
 /** Slugify a string for use in a drop ID. */

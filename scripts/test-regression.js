@@ -1438,6 +1438,7 @@ async function main() {
     await testImageUploadEndpoint();
     await testImageNormalization();
     await testRestaurantImageUrl();
+    await testStudioTimezone();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -3781,6 +3782,121 @@ function loadFormUtils() {
   } catch (err) {
     console.log(`  [WARN] Could not load ../app/admin/drops/form-utils: ${err.message}`);
     return null;
+  }
+}
+
+function loadDropHelpers() {
+  try {
+    return require("../lib/drops/helpers");
+  } catch (err) {
+    console.log(`  [WARN] Could not load ../lib/drops/helpers: ${err.message}`);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 38: Studio timezone serialization (America/Chicago ⇄ UTC)
+// Would have caught the "5-hour shift" bug where datetime-local wall-clock
+// was stored as UTC. Asserts exact UTC instants (not just equality between
+// two saves) and includes a winter CST case so a hardcoded -5 can't pass.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testStudioTimezone() {
+  console.log("\n── Test 38: Studio Timezone Serialization (America/Chicago) ──");
+
+  const mod = loadFormUtils();
+  if (!mod || typeof mod.toIso !== "function" || typeof mod.isoToLocal !== "function") {
+    ["#1", "#2", "#3", "#4", "#5", "#5b", "#6"].forEach((n) => skip(`Studio TZ ${n}`, "form-utils unavailable"));
+    return;
+  }
+  const { toIso, isoToLocal } = mod;
+  const epoch = (s) => Date.parse(s);
+  const utcMs = (local) => new Date(toIso(local)).getTime();
+
+  // #1 Summer CDT (UTC-5)
+  if (utcMs("2026-06-02T18:00") === epoch("2026-06-02T23:00:00Z"))
+    pass("Studio TZ #1: 2026-06-02 18:00 CDT → 2026-06-02T23:00:00Z");
+  else fail("Studio TZ #1", `got ${toIso("2026-06-02T18:00")}`);
+
+  // #2 End time CDT
+  if (utcMs("2026-06-26T07:00") === epoch("2026-06-26T12:00:00Z"))
+    pass("Studio TZ #2: 2026-06-26 07:00 CDT → 2026-06-26T12:00:00Z");
+  else fail("Studio TZ #2", `got ${toIso("2026-06-26T07:00")}`);
+
+  // #3 Winter CST (UTC-6) — DST edge; a hardcoded -5 would fail here
+  if (utcMs("2026-01-15T18:00") === epoch("2026-01-16T00:00:00Z"))
+    pass("Studio TZ #3: 2026-01-15 18:00 CST → 2026-01-16T00:00:00Z");
+  else fail("Studio TZ #3", `got ${toIso("2026-01-15T18:00")}`);
+
+  // #4 Summer CDT
+  if (utcMs("2026-07-15T18:00") === epoch("2026-07-15T23:00:00Z"))
+    pass("Studio TZ #4: 2026-07-15 18:00 CDT → 2026-07-15T23:00:00Z");
+  else fail("Studio TZ #4", `got ${toIso("2026-07-15T18:00")}`);
+
+  // #5 Anchored round-trip idempotency (CDT): both saves equal the CORRECT UTC
+  {
+    const correct = epoch("2026-06-02T23:00:00Z");
+    const firstIso = toIso("2026-06-02T18:00");
+    const reloaded = isoToLocal(firstIso); // UTC → Chicago datetime-local
+    const secondIso = toIso(reloaded);     // save again, unchanged
+    const ok =
+      reloaded === "2026-06-02T18:00" &&
+      new Date(firstIso).getTime() === correct &&
+      new Date(secondIso).getTime() === correct;
+    if (ok) pass("Studio TZ #5: CDT round-trip idempotent AND equal to 2026-06-02T23:00:00Z");
+    else fail("Studio TZ #5", `firstIso=${firstIso}, reloaded=${reloaded}, secondIso=${secondIso}`);
+  }
+
+  // #5b Anchored round-trip idempotency (CST)
+  {
+    const correct = epoch("2026-01-16T00:00:00Z");
+    const firstIso = toIso("2026-01-15T18:00");
+    const reloaded = isoToLocal(firstIso);
+    const secondIso = toIso(reloaded);
+    const ok =
+      reloaded === "2026-01-15T18:00" &&
+      new Date(firstIso).getTime() === correct &&
+      new Date(secondIso).getTime() === correct;
+    if (ok) pass("Studio TZ #5b: CST round-trip idempotent AND equal to 2026-01-16T00:00:00Z");
+    else fail("Studio TZ #5b", `firstIso=${firstIso}, reloaded=${reloaded}, secondIso=${secondIso}`);
+  }
+
+  // #6 Status engine with frozen time, using the correctly-stored instants.
+  // NOTE on this app's model: [start, end) is the PICKUP window; ordering
+  // is open BEFORE start (canPurchase = now < start), and is intentionally
+  // closed once pickup begins. So we assert the three real transitions.
+  const helpers = loadDropHelpers();
+  if (!helpers) {
+    skip("Studio TZ #6: status engine", "lib/drops/helpers unavailable");
+    return;
+  }
+  const item = {
+    status: "live",
+    start_time_iso: toIso("2026-06-02T18:00"), // 2026-06-02T23:00:00Z
+    end_time_iso: toIso("2026-06-26T07:00"),   // 2026-06-26T12:00:00Z
+  };
+  const realNow = Date.now;
+  const freeze = (iso) => { const ms = Date.parse(iso); Date.now = () => ms; };
+  try {
+    // Before start (5 PM Central Jun 2 = 22:00Z): orderable, not pickup, not ended.
+    freeze("2026-06-02T22:00:00Z");
+    if (helpers.canPurchase(item) === true && helpers.isPickupInProgress(item) === false && helpers.hasEnded(item) === false)
+      pass("Studio TZ #6a: before start → ordering open (NOT closed)");
+    else fail("Studio TZ #6a", `canPurchase=${helpers.canPurchase(item)} pickup=${helpers.isPickupInProgress(item)} ended=${helpers.hasEnded(item)}`);
+
+    // Inside window (Jun 10): pickup in progress, not ended.
+    freeze("2026-06-10T12:00:00Z");
+    if (helpers.isPickupInProgress(item) === true && helpers.hasEnded(item) === false)
+      pass("Studio TZ #6b: inside window → pickup in progress");
+    else fail("Studio TZ #6b", `pickup=${helpers.isPickupInProgress(item)} ended=${helpers.hasEnded(item)}`);
+
+    // After end (Jun 27): ended.
+    freeze("2026-06-27T00:00:00Z");
+    if (helpers.hasEnded(item) === true && helpers.isPickupInProgress(item) === false)
+      pass("Studio TZ #6c: after end → closed (hasEnded=true)");
+    else fail("Studio TZ #6c", `ended=${helpers.hasEnded(item)} pickup=${helpers.isPickupInProgress(item)}`);
+  } finally {
+    Date.now = realNow;
   }
 }
 
