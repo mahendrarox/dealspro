@@ -14,10 +14,26 @@ import {
 import { adminDb } from "@/lib/supabase-admin";
 import { diffFields, logAdminAction } from "./log";
 import type { Restaurant, RestaurantOption } from "./restaurants/types";
+// Archive reuses the LIVE status-engine helpers for window math — no copied
+// timezone/comparison logic lives in the archive feature.
+import { canPurchase, isPickupInProgress } from "@/lib/drops/helpers";
+import { dbRowToDropItem, DB_SELECT_COLS, isMissingArchivedColumn } from "@/lib/drops/db";
+import { evaluateArchive } from "./archive";
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T; noop?: boolean }
   | { ok: false; error?: string; fieldErrors?: Record<string, string[]> };
+
+type ArchiveResult =
+  | { ok: true; noop?: boolean }
+  | {
+      ok: false;
+      error?: string;
+      blocked?: boolean;
+      reason?: string;
+      requiresConfirmation?: boolean;
+      message?: string;
+    };
 
 /**
  * Strip the form-only `location_mode` discriminator before persisting —
@@ -240,6 +256,112 @@ export async function toggleHero(id: string): Promise<ActionResult> {
 
   await logAdminAction(admin.email, "toggle_hero", id, {
     is_hero: { before: current.is_hero, after: newValue },
+  });
+  revalidatePath("/admin/drops");
+  revalidatePath("/");
+  return { ok: true };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// DROP — ARCHIVE (non-destructive soft-hide)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Two-call contract:
+//   1. Client calls with confirmedImpact:false.
+//   2. Server re-fetches FRESH state and evaluates impact every call.
+//      - Hero/featured → blocked (always wins).
+//      - Impact risk + not confirmed → requiresConfirmation.
+//   3. Client re-calls with confirmedImpact:true after a strong confirm.
+//      - Server RE-CHECKS from scratch (never trusts the prior call), so a
+//        drop that became hero in between is still blocked.
+//
+// Archive only sets `archived_at = now()`. It NEVER deletes the row or
+// touches orders, leads, consent, analytics, payments, or redemptions.
+async function isOnlyNonArchivedActiveDrop(id: string): Promise<boolean> {
+  // Active + not archived. If the column isn't migrated yet, we can't make
+  // this determination — don't over-block, return false.
+  const { data, error } = await adminDb
+    .from("drop_items")
+    .select("id")
+    .eq("is_active", true)
+    .is("archived_at", null);
+  if (error || !data) return false;
+  return data.length === 1 && data[0].id === id;
+}
+
+export async function archiveDrop(
+  id: string,
+  opts?: { confirmedImpact?: boolean },
+): Promise<ArchiveResult> {
+  let admin: { email: string };
+  try {
+    admin = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Unauthorized" };
+  }
+
+  const confirmedImpact = opts?.confirmedImpact === true;
+
+  // Re-fetch FRESH state on every call — never trust a previous result.
+  const { data: row, error: fetchErr } = await adminDb
+    .from("drop_items")
+    .select(`${DB_SELECT_COLS}, archived_at`)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (fetchErr) {
+    if (isMissingArchivedColumn(fetchErr)) {
+      return { ok: false, error: "Archive is not available yet — apply migration-007 first." };
+    }
+    return { ok: false, error: "Drop not found" };
+  }
+  if (!row) return { ok: false, error: "Drop not found" };
+
+  // Already archived → idempotent no-op.
+  if ((row as { archived_at?: string | null }).archived_at) {
+    return { ok: true, noop: true };
+  }
+
+  // Compute window inputs via the LIVE status engine (no copied math).
+  const item = dbRowToDropItem(row as Parameters<typeof dbRowToDropItem>[0]);
+  const orderingOpen = canPurchase(item);
+  const inPickup = isPickupInProgress(item);
+  const isActive = (row as { is_active: boolean }).is_active === true;
+  const isHero = (row as { is_hero: boolean }).is_hero === true;
+  const onlyNonArchivedActive = isActive ? await isOnlyNonArchivedActiveDrop(id) : false;
+
+  const decision = evaluateArchive({
+    isHero,
+    isActive,
+    orderingOpen,
+    inPickup,
+    onlyNonArchivedActive,
+    confirmedImpact,
+  });
+
+  if (decision.decision === "blocked") {
+    return { ok: false, blocked: true, reason: decision.reason, message: decision.message };
+  }
+  if (decision.decision === "requires_confirmation") {
+    return { ok: false, requiresConfirmation: true, message: decision.message };
+  }
+
+  // Archive: set the timestamp only. Leave is_active and every related
+  // record untouched.
+  const { error: updErr } = await adminDb
+    .from("drop_items")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (updErr) {
+    if (isMissingArchivedColumn(updErr)) {
+      return { ok: false, error: "Archive is not available yet — apply migration-007 first." };
+    }
+    return { ok: false, error: "Could not archive drop" };
+  }
+
+  await logAdminAction(admin.email, "archive_drop", id, {
+    archived_at: { before: null, after: "now" },
   });
   revalidatePath("/admin/drops");
   revalidatePath("/");

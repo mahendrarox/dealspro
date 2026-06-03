@@ -1439,6 +1439,7 @@ async function main() {
     await testImageNormalization();
     await testRestaurantImageUrl();
     await testStudioTimezone();
+    await testArchiveDrops();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -3791,6 +3792,176 @@ function loadDropHelpers() {
   } catch (err) {
     console.log(`  [WARN] Could not load ../lib/drops/helpers: ${err.message}`);
     return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 39: Archive-only drop cleanup
+// Pure decision logic always runs; DB-level visibility tests are gated on
+// migration-007 (drop_items.archived_at) and skip cleanly if not applied.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testArchiveDrops() {
+  console.log("\n── Test 39: Archive-Only Drop Cleanup ──");
+
+  // ── Pure decision logic (no DB, always runs) ──
+  let archiveMod = null;
+  try { archiveMod = require("../lib/admin/archive"); } catch { archiveMod = null; }
+  if (!archiveMod || typeof archiveMod.evaluateArchive !== "function") {
+    ["hero block", "requires confirmation", "confirmed archive", "re-check", "negative", "predicates"].forEach((n) =>
+      skip(`Archive logic: ${n}`, "lib/admin/archive unavailable"));
+  } else {
+    const { evaluateArchive } = archiveMod;
+    const base = { isHero: false, isActive: false, orderingOpen: false, inPickup: false, onlyNonArchivedActive: false, confirmedImpact: false };
+
+    // Hero always wins, even with confirmedImpact:true.
+    const hero = evaluateArchive({ ...base, isHero: true, isActive: true, orderingOpen: true, onlyNonArchivedActive: true, confirmedImpact: true });
+    if (hero.decision === "blocked" && hero.reason === "featured_drop") pass("Archive logic: hero block always wins");
+    else fail("Archive logic: hero block", JSON.stringify(hero));
+
+    // Impact risk + unconfirmed → requires_confirmation.
+    const c1 = evaluateArchive({ ...base, isActive: true });
+    if (c1.decision === "requires_confirmation") pass("Archive logic: impact + unconfirmed → requires_confirmation");
+    else fail("Archive logic: requires_confirmation", JSON.stringify(c1));
+
+    // Confirmed + non-hero + still impact → archive.
+    const c2 = evaluateArchive({ ...base, isActive: true, orderingOpen: true, confirmedImpact: true });
+    if (c2.decision === "archive") pass("Archive logic: confirmed + impact + non-hero → archive");
+    else fail("Archive logic: confirmed archive", JSON.stringify(c2));
+
+    // RE-CHECK proof: same confirmedImpact:true, but now hero → blocked.
+    const recheck = evaluateArchive({ ...base, isActive: true, orderingOpen: true, confirmedImpact: true, isHero: true });
+    if (recheck.decision === "blocked" && recheck.reason === "featured_drop")
+      pass("Archive logic: re-check — became hero between calls → blocked despite confirmedImpact");
+    else fail("Archive logic: re-check", JSON.stringify(recheck));
+
+    // Negative: trips NONE of the flags → archive without confirmation.
+    const neg = evaluateArchive({ ...base });
+    if (neg.decision === "archive") pass("Archive logic: no impact flags → archive without confirmation");
+    else fail("Archive logic: negative case", JSON.stringify(neg));
+
+    // Each predicate independently requires confirmation.
+    const opn = evaluateArchive({ ...base, orderingOpen: true });
+    const pk = evaluateArchive({ ...base, inPickup: true });
+    const only = evaluateArchive({ ...base, onlyNonArchivedActive: true });
+    if (opn.decision === "requires_confirmation" && pk.decision === "requires_confirmation" && only.decision === "requires_confirmation")
+      pass("Archive logic: ordering-open / pickup / only-active each require confirmation");
+    else fail("Archive logic: individual predicates", JSON.stringify({ opn, pk, only }));
+  }
+
+  // ── Window inputs derive from the LIVE status helpers (wiring proof) ──
+  const helpers = loadDropHelpers();
+  const formUtils = loadFormUtils();
+  if (helpers && formUtils && typeof helpers.canPurchase === "function" && typeof formUtils.toIso === "function") {
+    const realNow = Date.now;
+    try {
+      const item = {
+        status: "live",
+        start_time_iso: formUtils.toIso("2026-06-02T18:00"), // 2026-06-02T23:00:00Z
+        end_time_iso: formUtils.toIso("2026-06-26T07:00"),
+      };
+      Date.now = () => Date.parse("2026-06-02T22:00:00Z"); // before start
+      const okBefore = helpers.canPurchase(item) === true && helpers.isPickupInProgress(item) === false;
+      Date.now = () => Date.parse("2026-06-10T12:00:00Z"); // inside window
+      const okInside = helpers.canPurchase(item) === false && helpers.isPickupInProgress(item) === true;
+      if (okBefore && okInside) pass("Archive: orderingOpen/inPickup come from real status helpers (canPurchase/isPickupInProgress)");
+      else fail("Archive: helper wiring", `before=${okBefore} inside=${okInside}`);
+    } finally { Date.now = realNow; }
+  } else {
+    skip("Archive: helper wiring", "helpers/form-utils unavailable");
+  }
+
+  // ── Empty-state: zero visible drops must not crash featured selection ──
+  let dropsLib = null;
+  try { dropsLib = require("../lib/drops"); } catch { dropsLib = null; }
+  if (dropsLib && typeof dropsLib.selectFeatured === "function") {
+    let crashed = false, featured;
+    try { featured = dropsLib.selectFeatured([], [], {}); } catch { crashed = true; }
+    if (!crashed && featured === null) pass("Archive: empty state — selectFeatured([],[],{}) → null (no crash)");
+    else fail("Archive: empty state", `crashed=${crashed} featured=${JSON.stringify(featured)}`);
+  } else {
+    skip("Archive: empty state", "lib/drops unavailable");
+  }
+
+  // ── DB-level visibility (gated on migration-007) ──
+  const supabase = getSupabase();
+  const probe = await supabase.from("drop_items").select("archived_at").limit(1);
+  if (probe.error) {
+    [
+      "archived_at set + row preserved",
+      "related order persists",
+      "excluded from public listing",
+      "appears in archived view",
+      "active=true archived still excluded",
+      "non-archived is_active behavior intact",
+    ].forEach((n) => skip(`Archive DB: ${n}`, "drop_items.archived_at not migrated (apply migration-007)"));
+    return;
+  }
+
+  const aId = "test-arch-on-" + Date.now();   // will be archived
+  const bId = "test-arch-off-" + Date.now();  // stays visible
+  const phone = "+13405550050";
+  const mkDrop = (id) =>
+    supabase.from("drop_items").insert({
+      id, title: "Arch Test", restaurant_name: "Arch Kitchen", price: 5, total_spots: 50,
+      start_time: new Date(Date.now() - 3600_000).toISOString(),
+      end_time: new Date(Date.now() + 7 * 24 * 3600_000).toISOString(),
+      is_active: true, archived_at: null,
+    });
+  // Mirrors getActiveDropsFromDb's public filter exactly.
+  const publicListIds = async () => {
+    const { data } = await supabase.from("drop_items").select("id").eq("is_active", true).is("archived_at", null);
+    return (data ?? []).map((r) => r.id);
+  };
+
+  try {
+    await supabase.from("orders").delete().eq("phone", phone);
+    await supabase.from("drop_items").delete().in("id", [aId, bId]);
+    const e1 = await mkDrop(bId);
+    const e2 = await mkDrop(aId);
+    if (e1.error || e2.error) { fail("Archive DB: seed", (e1.error || e2.error).message); return; }
+
+    // Related record that must survive the archive.
+    await supabase.rpc("create_order_atomic", {
+      p_stripe_session_id: "test_arch_" + Date.now(), p_phone: phone, p_drop_item_id: aId,
+      p_drop_title: "Arch Test", p_restaurant_name: "Arch Kitchen", p_price_paid: 5,
+      p_quantity: 1, p_qr_token: "test_arch_qr_" + Date.now(), p_total_spots: 50,
+    });
+
+    // Archive aId at the DB layer — mirrors exactly what archiveDrop writes:
+    // archived_at = now(), is_active left untouched, nothing deleted.
+    const arch = await supabase.from("drop_items").update({ archived_at: new Date().toISOString() }).eq("id", aId);
+    if (arch.error) { fail("Archive DB: set archived_at", arch.error.message); return; }
+
+    // #1/#2 archived_at set, row preserved, active unchanged
+    const { data: archRow } = await supabase.from("drop_items").select("id, is_active, archived_at").eq("id", aId).maybeSingle();
+    if (archRow && archRow.archived_at && archRow.is_active === true) pass("Archive DB: archived_at set; row preserved; active unchanged");
+    else fail("Archive DB: archived row", JSON.stringify(archRow));
+
+    // #3 related order persists
+    const { count: oCount } = await supabase.from("orders").select("*", { count: "exact", head: true }).eq("drop_item_id", aId);
+    if (oCount === 1) pass("Archive DB: related order persists after archive");
+    else fail("Archive DB: order persistence", `expected 1, got ${oCount}`);
+
+    // #4/#6/#7 excluded from public listing (archived active=true still excluded), non-archived present
+    const ids = await publicListIds();
+    if (!ids.includes(aId) && ids.includes(bId)) pass("Archive DB: archived (active=true) excluded from public listing; non-archived present");
+    else fail("Archive DB: listing filter", `aId present=${ids.includes(aId)}, bId present=${ids.includes(bId)}`);
+
+    // #5 archived view shows it
+    const { data: av } = await supabase.from("drop_items").select("id").not("archived_at", "is", null).eq("id", aId);
+    if (av && av.length === 1) pass("Archive DB: archived drop appears in archived view query");
+    else fail("Archive DB: archived view", JSON.stringify(av));
+
+    // #8 existing is_active behavior intact for non-archived drops
+    await supabase.from("drop_items").update({ is_active: false }).eq("id", bId);
+    const ids2 = await publicListIds();
+    await supabase.from("drop_items").update({ is_active: true }).eq("id", bId);
+    if (!ids2.includes(bId)) pass("Archive DB: inactive non-archived drop excluded (is_active behavior intact)");
+    else fail("Archive DB: is_active behavior", "inactive non-archived drop still listed");
+  } finally {
+    await supabase.from("orders").delete().eq("phone", phone);
+    await supabase.from("drop_items").delete().in("id", [aId, bId]);
   }
 }
 

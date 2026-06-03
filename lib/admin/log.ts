@@ -5,6 +5,7 @@ export type AdminAction =
   | "update_drop"
   | "toggle_active"
   | "toggle_hero"
+  | "archive_drop"
   | "create_restaurant"
   | "update_restaurant"
   | "toggle_restaurant_active";

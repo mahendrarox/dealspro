@@ -16,6 +16,19 @@ import type { DropItem } from "./types";
 const DB_SELECT_COLS =
   "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, created_at, updated_at, address, latitude, longitude";
 
+/**
+ * True when a Supabase/PostgREST error is the "archived_at column does not
+ * exist" error — i.e. migration-007 has not been applied yet. Lets the
+ * public queries degrade to their pre-archive behavior so a code deploy
+ * that lands before the migration doesn't take down the storefront.
+ * (Per the mandated deploy order the migration lands first; this is a
+ * safety net, not the happy path.)
+ */
+export function isMissingArchivedColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "42703" || /archived_at/i.test(error.message ?? "");
+}
+
 // ─── DB row type ─────────────────────────────────────────────────────
 
 type DbDropRow = {
@@ -84,13 +97,23 @@ function dbRowToDropItem(row: DbDropRow): DropItem {
 // ─── Public listing: active drops only, ordered in SQL ───────────────
 
 export async function getActiveDropsFromDb(): Promise<DropItem[]> {
-  const { data, error } = await adminDb
-    .from("drop_items")
-    .select(DB_SELECT_COLS)
-    .eq("is_active", true)
-    .order("is_hero", { ascending: false })
-    .order("priority", { ascending: true })
-    .order("created_at", { ascending: false });
+  // Build the base active-drops query (hero/priority/recency ordering).
+  const baseQuery = () =>
+    adminDb
+      .from("drop_items")
+      .select(DB_SELECT_COLS)
+      .eq("is_active", true)
+      .order("is_hero", { ascending: false })
+      .order("priority", { ascending: true })
+      .order("created_at", { ascending: false });
+
+  // Archive always wins over active: exclude any archived row from public
+  // views. Fall back to the unfiltered query only if the column hasn't been
+  // migrated yet (pre-deploy safety net).
+  let { data, error } = await baseQuery().is("archived_at", null);
+  if (error && isMissingArchivedColumn(error)) {
+    ({ data, error } = await baseQuery());
+  }
 
   if (error) {
     console.error("[drops/db] getActiveDropsFromDb error:", error.message);
@@ -129,5 +152,5 @@ export async function getDropRow(id: string): Promise<DbDropRow | null> {
   return data as DbDropRow;
 }
 
-export { dbRowToDropItem };
+export { dbRowToDropItem, DB_SELECT_COLS };
 export type { DbDropRow, DropItem };
