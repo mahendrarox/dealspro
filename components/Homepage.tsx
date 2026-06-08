@@ -298,8 +298,14 @@ function CaptureForm({ dark }) {
             </div>
           )}
         </div>
-        {showPhoneError && (
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "6px", paddingLeft: "2px" }}>Enter a valid US phone number</div>
+        {/* In-field live countdown: shown while typing (1–9 digits) and on
+            blur/submit when still empty. Replaces the old static error; the
+            green check (showPhoneOk) still handles the complete state, so we
+            never render "0 more digits needed". */}
+        {!phoneValid && (digits.length > 0 || showPhoneError) && (
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "6px", paddingLeft: "2px" }}>
+            {digitsLeft} more digit{digitsLeft === 1 ? "" : "s"} needed
+          </div>
         )}
       </div>
 
@@ -389,7 +395,7 @@ function CaptureForm({ dark }) {
         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
         boxShadow: allValid && !loading ? "0 4px 16px rgba(249,58,37,0.45), 0 1px 3px rgba(0,0,0,0.1)" : "none",
       }}>
-        {loading ? "Setting up checkout..." : allValid ? "Get My Deals" : !nameValid ? "Enter your name to continue" : !phoneValid ? (digits.length === 0 ? "Enter your phone number" : `${digitsLeft} digit${digitsLeft !== 1 ? "s" : ""} remaining`) : "Check the opt-in box above"}
+        {loading ? "Setting up checkout..." : "Get drop alerts"}
         {allValid && !loading && <span style={{ fontSize: "18px" }}>→</span>}
       </button>
 

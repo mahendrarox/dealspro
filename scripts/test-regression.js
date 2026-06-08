@@ -3872,6 +3872,23 @@ async function testOptInCopy() {
     pass("Opt-in #7: hero H1 unchanged");
   else fail("Opt-in #7: hero H1", "hero H1 changed or missing");
 
+  // #8 Submit button is a static CTA "Get drop alerts" with no dynamic
+  // instructional text (countdown now lives under the phone field).
+  const ctaStatic = html.includes("Get drop alerts");
+  const noDynamicCta =
+    !html.includes("digits remaining") &&
+    !html.includes("Enter your phone number") &&
+    !html.includes("Enter your name to continue");
+  if (ctaStatic && noDynamicCta)
+    pass("Opt-in #8: button is static 'Get drop alerts' (no dynamic instructional text)");
+  else fail("Opt-in #8: static CTA", `static=${ctaStatic} noDynamic=${noDynamicCta}`);
+
+  // #9 In-field countdown wording ("9 more digits needed" … "1 more digit
+  // needed") depends on live typed state. The HTTP harness fetches static
+  // SSR HTML and cannot type into the input, so this is not practical here —
+  // reported honestly rather than faked with a source grep.
+  skip("Opt-in #9: in-field countdown wording per digit count", "HTTP harness cannot simulate typing into the phone input");
+
   // #6 Opt-In Policy page reflects new language, old mismatched quote gone.
   try {
     const res = await fetchWithRetry(`${BASE_URL}/opt-in`);
