@@ -303,8 +303,17 @@ function CaptureForm({ dark }) {
         )}
       </div>
 
-      {/* Opt-in checkbox + disclosure (plain control; copy centralized in lib/legal/opt-in-copy) */}
-      <div style={{ marginBottom: "20px" }}>
+      {/* Opt-in checkbox + disclosure (plain control; copy centralized in lib/legal/opt-in-copy).
+          Container tint is driven ONLY by `optIn`: soft red = "not selected yet"
+          (not an error), green = selected. Compact, not a bulky block. */}
+      <div style={{
+        marginBottom: "20px",
+        padding: "14px 16px",
+        borderRadius: T.radius.lg,
+        background: optIn ? "rgba(22,163,74,0.08)" : "rgba(249,58,37,0.06)",
+        border: `1.5px solid ${optIn ? "rgba(22,163,74,0.25)" : "rgba(249,58,37,0.22)"}`,
+        transition: "background-color 150ms ease, border-color 150ms ease",
+      }}>
         <label
           style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}
           onClick={() => { setOptIn(!optIn); setConsentTouched(true); }}
