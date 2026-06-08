@@ -3826,17 +3826,31 @@ async function testOptInCopy() {
     pass("Opt-in #2: homepage shows new short consent label");
   else fail("Opt-in #2: short label", "missing 'I agree to receive DealsPro marketing text alerts.'");
 
-  // #3 intact pre-link disclosure clause (NOT the whole disclosure, since
-  // Terms/Privacy are split into links).
-  if (html.includes("Recurring automated marketing text messages from DealsPro about local deals and drops from participating businesses,"))
-    pass("Opt-in #3: rendered homepage contains intact pre-link disclosure clause");
-  else fail("Opt-in #3: disclosure clause", "missing intact pre-link disclosure clause");
+  // #3 BEFORE the box is checked (default SSR state): show the short helper
+  // line and NOT the full legal disclosure.
+  const helperLine = "By checking this box, you agree to receive DealsPro marketing text alerts.";
+  const fullDisclosureClause = "Recurring automated marketing text messages from DealsPro about local deals and drops from participating businesses,";
+  if (html.includes(helperLine) && !html.includes(fullDisclosureClause))
+    pass("Opt-in #3: pre-checkbox shows short helper line and hides the full disclosure");
+  else fail("Opt-in #3: pre-checkbox disclosure", `helper=${html.includes(helperLine)} fullHidden=${!html.includes(fullDisclosureClause)}`);
 
-  // #4 Terms/Privacy links present near the disclosure (>Terms</a> is unique
-  // to the disclosure; the footer uses 'Terms of Service').
-  if (html.includes('href="/terms"') && html.includes('href="/privacy"') && html.includes(">Terms</a>"))
-    pass("Opt-in #4: homepage links /terms and /privacy in the disclosure");
-  else fail("Opt-in #4: terms/privacy links", `terms=${html.includes('href="/terms"')} privacy=${html.includes('href="/privacy"')} disclosureTermsLink=${html.includes(">Terms</a>")}`);
+  // #4 AFTER the box is checked: summary line + full canonical disclosure
+  // with /terms and /privacy links. The HTTP harness can't toggle React
+  // state, so verify the checked-branch rendering via source inspection of
+  // the live component (per spec: don't overbuild a DOM harness).
+  try {
+    const fs = require("fs");
+    const src = fs.readFileSync(path.resolve(__dirname, "..", "components", "Homepage.tsx"), "utf8");
+    const hasSummary = src.includes("DealsPro may text you local deals and limited drops.");
+    const usesDisclosure = src.includes("splitDisclosureForLinks(");
+    const linksTermsPrivacy = src.includes("DEALSPRO_TERMS_PATH") && src.includes("DEALSPRO_PRIVACY_PATH");
+    const gatedOnOptIn = /!optIn\s*\?/.test(src);
+    if (hasSummary && usesDisclosure && linksTermsPrivacy && gatedOnOptIn)
+      pass("Opt-in #4: checked state renders summary + full disclosure w/ Terms+Privacy links (gated on optIn)");
+    else fail("Opt-in #4: checked-state disclosure", `summary=${hasSummary} disclosure=${usesDisclosure} links=${linksTermsPrivacy} gated=${gatedOnOptIn}`);
+  } catch (err) {
+    fail("Opt-in #4: source check", err.message);
+  }
 
   // #5 old vague copy gone from the RENDERED homepage
   const oldStrings = [

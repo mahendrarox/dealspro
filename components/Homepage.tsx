@@ -323,21 +323,34 @@ function CaptureForm({ dark }) {
           </span>
         </label>
 
-        {/* Full disclosure — smaller, muted, directly below the checkbox row.
-            Terms and Privacy Policy are two separate links; "and" is plain. */}
-        {(() => {
-          const { pre, between, post } = splitDisclosureForLinks();
-          const linkStyle = { color: T.color.red500, textDecoration: "underline" } as const;
-          return (
-            <p style={{ fontFamily: T.font.display, fontSize: "11px", lineHeight: 1.5, color: T.color.n500, margin: "8px 0 0", paddingLeft: "32px" }}>
-              {pre}
-              <a href={DEALSPRO_TERMS_PATH} style={linkStyle}>{DEALSPRO_TERMS_LABEL}</a>
-              {between}
-              <a href={DEALSPRO_PRIVACY_PATH} style={linkStyle}>{DEALSPRO_PRIVACY_LABEL}</a>
-              {post}
-            </p>
-          );
-        })()}
+        {/* Disclosure presentation only (no state/behavior change):
+            - before the box is checked: a short helper line.
+            - after it's checked: a summary line + the full canonical
+              disclosure with Terms / Privacy Policy links. */}
+        {!optIn ? (
+          <p style={{ fontFamily: T.font.display, fontSize: "11px", lineHeight: 1.5, color: T.color.n500, margin: "8px 0 0", paddingLeft: "32px" }}>
+            By checking this box, you agree to receive DealsPro marketing text alerts.
+          </p>
+        ) : (
+          (() => {
+            const { pre, between, post } = splitDisclosureForLinks();
+            const linkStyle = { color: T.color.red500, textDecoration: "underline" } as const;
+            return (
+              <div style={{ margin: "8px 0 0", paddingLeft: "32px" }}>
+                <p style={{ fontFamily: T.font.display, fontSize: "12px", lineHeight: 1.5, color: T.color.n900, fontWeight: 500, margin: "0 0 4px" }}>
+                  DealsPro may text you local deals and limited drops.
+                </p>
+                <p style={{ fontFamily: T.font.display, fontSize: "11px", lineHeight: 1.5, color: T.color.n500, margin: 0 }}>
+                  {pre}
+                  <a href={DEALSPRO_TERMS_PATH} style={linkStyle}>{DEALSPRO_TERMS_LABEL}</a>
+                  {between}
+                  <a href={DEALSPRO_PRIVACY_PATH} style={linkStyle}>{DEALSPRO_PRIVACY_LABEL}</a>
+                  {post}
+                </p>
+              </div>
+            );
+          })()
+        )}
 
         {showConsentError && (
           <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "8px", paddingLeft: "32px", fontWeight: 500 }}>Please agree to receive marketing text alerts</div>
