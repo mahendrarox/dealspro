@@ -1440,6 +1440,7 @@ async function main() {
     await testRestaurantImageUrl();
     await testStudioTimezone();
     await testArchiveDrops();
+    await testOptInCopy();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -3792,6 +3793,82 @@ function loadDropHelpers() {
   } catch (err) {
     console.log(`  [WARN] Could not load ../lib/drops/helpers: ${err.message}`);
     return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 40: Opt-in copy centralization + Terms/Privacy links
+// Asserts on the RENDERED "/" and "/opt-in" output (not a repo-wide source
+// grep) — the intentionally-preserved dead duplicate ui/CaptureForm.tsx may
+// still contain old strings, which is fine because it isn't mounted.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function testOptInCopy() {
+  console.log("\n── Test 40: Opt-In Copy + Terms/Privacy Links ──");
+
+  // Rendered homepage HTML.
+  let html;
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/`);
+    html = await res.text();
+    if (res.status !== 200) { fail("Opt-in copy: GET /", `status ${res.status}`); return; }
+  } catch (err) {
+    fail("Opt-in copy: GET /", err.message);
+    return;
+  }
+
+  // #1 new title
+  if (html.includes("Get DealsPro Drop Alerts")) pass("Opt-in #1: homepage shows 'Get DealsPro Drop Alerts'");
+  else fail("Opt-in #1: title", "missing 'Get DealsPro Drop Alerts'");
+
+  // #2 new short checkbox label
+  if (html.includes("I agree to receive DealsPro marketing text alerts."))
+    pass("Opt-in #2: homepage shows new short consent label");
+  else fail("Opt-in #2: short label", "missing 'I agree to receive DealsPro marketing text alerts.'");
+
+  // #3 intact pre-link disclosure clause (NOT the whole disclosure, since
+  // Terms/Privacy are split into links).
+  if (html.includes("Recurring automated marketing text messages from DealsPro about local deals and drops from participating businesses,"))
+    pass("Opt-in #3: rendered homepage contains intact pre-link disclosure clause");
+  else fail("Opt-in #3: disclosure clause", "missing intact pre-link disclosure clause");
+
+  // #4 Terms/Privacy links present near the disclosure (>Terms</a> is unique
+  // to the disclosure; the footer uses 'Terms of Service').
+  if (html.includes('href="/terms"') && html.includes('href="/privacy"') && html.includes(">Terms</a>"))
+    pass("Opt-in #4: homepage links /terms and /privacy in the disclosure");
+  else fail("Opt-in #4: terms/privacy links", `terms=${html.includes('href="/terms"')} privacy=${html.includes('href="/privacy"')} disclosureTermsLink=${html.includes(">Terms</a>")}`);
+
+  // #5 old vague copy gone from the RENDERED homepage
+  const oldStrings = [
+    "Get Exclusive Deals",
+    "I agree to receive deal alerts via SMS. No spam. Reply STOP anytime.",
+    "Free forever. No spam. Unsubscribe anytime.",
+  ];
+  const leftover = oldStrings.filter((s) => html.includes(s));
+  if (leftover.length === 0) pass("Opt-in #5: rendered homepage no longer contains old opt-in copy");
+  else fail("Opt-in #5: old copy still rendered", JSON.stringify(leftover));
+
+  // #7 hero H1 unchanged. The H1 wraps "Limited Drops." in a <span>, so the
+  // plain string isn't contiguous in HTML — assert the three fragments.
+  if (
+    html.includes("Exclusive Restaurant Deals.") &&
+    html.includes("Limited Drops.") &&
+    html.includes("Sent to Your Phone.")
+  )
+    pass("Opt-in #7: hero H1 unchanged");
+  else fail("Opt-in #7: hero H1", "hero H1 changed or missing");
+
+  // #6 Opt-In Policy page reflects new language, old mismatched quote gone.
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/opt-in`);
+    const policy = await res.text();
+    if (res.status !== 200) { fail("Opt-in #6: GET /opt-in", `status ${res.status}`); return; }
+    const hasNew = policy.includes("Recurring automated marketing text messages from DealsPro");
+    const hasOld = policy.includes("I agree to receive exclusive deal alerts and promotions via RCS/SMS");
+    if (hasNew && !hasOld) pass("Opt-in #6: /opt-in policy uses new DealsPro-wide consent language; old quote removed");
+    else fail("Opt-in #6: policy page", `hasNew=${hasNew} hasOldQuote=${hasOld}`);
+  } catch (err) {
+    fail("Opt-in #6: GET /opt-in", err.message);
   }
 }
 

@@ -6,6 +6,17 @@ import type { DropItem } from "@/lib/drops/types";
 import { formatPhone } from "@/components/PhoneInput";
 import { useUserLocation } from "@/lib/hooks/useUserLocation";
 import DropsSection, { DropCard, type DropsData } from "@/components/DropsSection";
+import {
+  DEALSPRO_OPT_IN_TITLE,
+  DEALSPRO_OPT_IN_SUBTITLE,
+  DEALSPRO_SMS_OPT_IN_SHORT_TEXT,
+  DEALSPRO_OPT_IN_FOOTER,
+  DEALSPRO_TERMS_PATH,
+  DEALSPRO_PRIVACY_PATH,
+  DEALSPRO_TERMS_LABEL,
+  DEALSPRO_PRIVACY_LABEL,
+  splitDisclosureForLinks,
+} from "@/lib/legal/opt-in-copy";
 
 const T = {
   color: {
@@ -221,8 +232,8 @@ function CaptureForm({ dark }) {
       backdropFilter: "blur(12px)",
     }}>
       <div style={{ textAlign: "center", marginBottom: "24px" }}>
-        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "6px" }}>Get Exclusive Deals</div>
-        <div style={{ fontFamily: T.font.display, fontSize: "14px", color: T.color.n500 }}>Sign up in 10 seconds. No app needed.</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "6px" }}>{DEALSPRO_OPT_IN_TITLE}</div>
+        <div style={{ fontFamily: T.font.display, fontSize: "14px", color: T.color.n500 }}>{DEALSPRO_OPT_IN_SUBTITLE}</div>
       </div>
 
       {/* Name */}
@@ -292,56 +303,46 @@ function CaptureForm({ dark }) {
         )}
       </div>
 
-      {/* Opt-in checkbox */}
-      {(() => {
-        // Attention nudge: name+phone valid, consent unchecked, and the
-        // amber error isn't already showing (error wins as it's the stronger signal).
-        const nudgeConsent = nameValid && phoneValid && !optIn && !showConsentError;
-        return (
-      <div
-        className={nudgeConsent ? "consent-nudge" : undefined}
-        style={{
-        background: nudgeConsent
-          ? "rgba(249, 58, 37, 0.06)"
-          : T.color.green50,
-        border: `1.5px solid ${
-          showConsentError
-            ? AMBER
-            : nudgeConsent
-              ? "rgba(249, 58, 37, 0.22)"
-              : "rgba(22,163,74,0.12)"
-        }`,
-        borderRadius: T.radius.lg,
-        padding: "16px",
-        marginBottom: "20px",
-        transition: "border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease",
-        boxShadow: nudgeConsent ? "0 0 0 3px rgba(249, 58, 37, 0.08)" : "none",
-        // Subtle pulse, exactly 2 cycles, then settles.
-        // Disabled via @media (prefers-reduced-motion: reduce) on .consent-nudge.
-        animation: nudgeConsent ? "consentNudge 1.6s ease-in-out 2" : "none",
-      }}>
-        <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", minHeight: "24px" }}
-          onClick={() => { setOptIn(!optIn); setConsentTouched(true); }}>
+      {/* Opt-in checkbox + disclosure (plain control; copy centralized in lib/legal/opt-in-copy) */}
+      <div style={{ marginBottom: "20px" }}>
+        <label
+          style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}
+          onClick={() => { setOptIn(!optIn); setConsentTouched(true); }}
+        >
           <div style={{
-            width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0,
+            width: "22px", height: "22px", borderRadius: "6px", flexShrink: 0, marginTop: "1px",
             border: `2px solid ${optIn ? VALID_GREEN : showConsentError ? AMBER : T.color.n300}`,
             background: optIn ? VALID_GREEN : T.color.n0,
             display: "flex", alignItems: "center", justifyContent: "center",
             transition: `all ${T.tr.fast}`,
-            boxShadow: optIn ? "0 2px 8px rgba(34,197,94,0.3)" : "none",
           }}>
-            {optIn && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+            {optIn && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
           </div>
-          <span style={{ fontFamily: T.font.display, fontSize: "13px", lineHeight: 1.4, color: T.color.n500 }}>
-            I agree to receive deal alerts via SMS. No spam. Reply STOP anytime.
+          <span style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.4, color: T.color.n900, fontWeight: 500 }}>
+            {DEALSPRO_SMS_OPT_IN_SHORT_TEXT}
           </span>
         </label>
+
+        {/* Full disclosure — smaller, muted, directly below the checkbox row.
+            Terms and Privacy Policy are two separate links; "and" is plain. */}
+        {(() => {
+          const { pre, between, post } = splitDisclosureForLinks();
+          const linkStyle = { color: T.color.red500, textDecoration: "underline" } as const;
+          return (
+            <p style={{ fontFamily: T.font.display, fontSize: "11px", lineHeight: 1.5, color: T.color.n500, margin: "8px 0 0", paddingLeft: "32px" }}>
+              {pre}
+              <a href={DEALSPRO_TERMS_PATH} style={linkStyle}>{DEALSPRO_TERMS_LABEL}</a>
+              {between}
+              <a href={DEALSPRO_PRIVACY_PATH} style={linkStyle}>{DEALSPRO_PRIVACY_LABEL}</a>
+              {post}
+            </p>
+          );
+        })()}
+
         {showConsentError && (
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "8px", paddingLeft: "36px", fontWeight: 500 }}>Please agree to receive deal alerts</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "8px", paddingLeft: "32px", fontWeight: 500 }}>Please agree to receive marketing text alerts</div>
         )}
       </div>
-        );
-      })()}
 
       {/* Eligibility message */}
       {allValid && (
@@ -376,7 +377,7 @@ function CaptureForm({ dark }) {
         </div>
       )}
 
-      <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "14px", textAlign: "center" }}>Free forever. No spam. Unsubscribe anytime.</div>
+      <div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "14px", textAlign: "center" }}>{DEALSPRO_OPT_IN_FOOTER}</div>
     </div>
   );
 }

@@ -1,3 +1,8 @@
+import {
+  DEALSPRO_SMS_OPT_IN_SHORT_TEXT,
+  DEALSPRO_SMS_OPT_IN_DISCLOSURE,
+} from "@/lib/legal/opt-in-copy";
+
 export const metadata = {
   title: "Opt-In Policy — DealsPro",
   description: "DealsPro opt-in policy explaining how we collect consent for RCS/SMS messaging.",
@@ -38,7 +43,7 @@ export default function OptInPolicy() {
           We collect your express written consent to receive messages through the following methods:
         </p>
         <ul style={s.ul}>
-          <li style={s.li}><span style={s.strong}>Website Sign-Up Form:</span> When you enter your name and phone number on dealspro.ai and check the opt-in checkbox that states: <em>"I agree to receive exclusive deal alerts and promotions via RCS/SMS. Message & data rates may apply. Reply STOP to unsubscribe anytime."</em></li>
+          <li style={s.li}><span style={s.strong}>Website Sign-Up Form:</span> When you enter your name and phone number on dealspro.ai and check the opt-in checkbox that states: <em>&ldquo;{DEALSPRO_SMS_OPT_IN_SHORT_TEXT}&rdquo;</em> The checkbox is accompanied by this disclosure: <em>&ldquo;{DEALSPRO_SMS_OPT_IN_DISCLOSURE}&rdquo;</em></li>
           <li style={s.li}><span style={s.strong}>QR Code Scan:</span> When you scan a DealsPro QR code at a participating restaurant and complete the opt-in form.</li>
           <li style={s.li}><span style={s.strong}>Creator/Influencer Referral:</span> When you opt in through a creator's branded DealsPro page and complete the consent form.</li>
         </ul>
