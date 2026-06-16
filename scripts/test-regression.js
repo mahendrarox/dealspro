@@ -5112,11 +5112,14 @@ async function testSmartUrlRoute() {
       const res = await fetchWithRetry(`${BASE_URL}/r/${slug}`, { redirect: "manual" });
       const html = await res.text();
       const leaked = [archived, inactive, closed, soldout].filter((d) => html.includes(`/drop/${d.id}`));
-      const stillTwo = html.includes("2 live drops");
-      if (res.status === 200 && leaked.length === 0 && stillTwo) {
+      // Structural assertion (robust to React SSR comment markers in text):
+      // the two claimable drops (dropIds[0]/[1]) must still be listed, and the
+      // four excluded drops must be absent.
+      const claimablePresent = dropIds.slice(0, 2).every((id) => html.includes(`/drop/${id}`));
+      if (res.status === 200 && leaked.length === 0 && claimablePresent) {
         pass("Smart URL: archived/inactive/sold-out/ordering-closed all excluded");
       } else {
-        fail("Smart URL: eligibility exclusion", `status=${res.status} leaked=${leaked.map((d)=>d.k).join(",")} stillTwo=${stillTwo}`);
+        fail("Smart URL: eligibility exclusion", `status=${res.status} leaked=${leaked.map((d)=>d.k).join(",")} claimablePresent=${claimablePresent}`);
       }
     }
   } catch (err) {
