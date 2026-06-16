@@ -5,13 +5,16 @@ import { normalizePhone } from "@/lib/phone";
 export async function POST(request: NextRequest) {
   console.log("[Lead] Form submit received");
 
-  let body: { name?: string; phone?: string; optIn?: boolean };
+  let body: { name?: string; phone?: string; optIn?: boolean; sourceSlug?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // `sourceSlug` is accepted for forward-compat with the /r/[slug] capture
+  // form but intentionally NOT persisted (attribution is out of scope for
+  // this change). Destructured only so it never leaks into the upsert.
   const { name, phone, optIn } = body;
 
   if (!phone) {
@@ -31,15 +34,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  // Strict boolean: consent is true ONLY for a literal `true`. Every other
-  // value — missing, false, null, "true"/"false" strings, 1/0, objects —
-  // resolves to false. This prevents a truthy non-boolean (e.g. the string
-  // "false") from being stored as consent.
-  const consent = optIn === true;
+  // Strict boolean: explicit opt-in is true ONLY for a literal `true`.
+  // Every other value — missing, false, null, "true"/"false" strings, 1/0,
+  // objects — resolves to false.
+  const explicitOptIn = optIn === true;
+
+  // ── MONOTONIC CONSENT (preservation) ────────────────────────────────
+  // Consent may only ever go UP through this path. Read the existing row
+  // and merge so a returning user who omits the opt-in box (quick capture,
+  // claim form, etc.) can NEVER silently downgrade an existing `true`.
+  // Only STOP / admin / system unsubscribe workflows may set consent false.
+  const { data: existing } = await supabase
+    .from("users")
+    .select("name, consent")
+    .eq("phone", e164Phone)
+    .maybeSingle();
+
+  // true is sticky; false/null upgrades to true only on explicit opt-in.
+  const consent = existing?.consent === true ? true : explicitOptIn;
+
+  // Never clobber an existing real name with the placeholder on a
+  // name-less capture. A freshly provided name still wins.
+  const finalName = name?.trim() || existing?.name || "DealsPro User";
 
   const upsertData: Record<string, unknown> = {
     phone: e164Phone,
-    name: name?.trim() || "DealsPro User",
+    name: finalName,
     consent,
     updated_at: new Date().toISOString(),
   };

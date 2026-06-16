@@ -16,6 +16,7 @@ const T = {
 type RestaurantRowProps = {
   restaurant: {
     id: string;
+    slug: string;
     name: string;
     city: string;
     tags: string[];
@@ -27,6 +28,20 @@ type RestaurantRowProps = {
 export default function RestaurantRow({ restaurant: r }: RestaurantRowProps) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const smartPath = `/r/${r.slug}`;
+  const onCopy = () => {
+    const abs =
+      typeof window !== "undefined" ? `${window.location.origin}${smartPath}` : smartPath;
+    try {
+      navigator.clipboard?.writeText(abs);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — non-fatal */
+    }
+  };
 
   const onToggle = () => {
     setError(null);
@@ -60,6 +75,38 @@ export default function RestaurantRow({ restaurant: r }: RestaurantRowProps) {
           ) : (
             <span style={{ color: T.amber, marginLeft: 8 }}>· manual</span>
           )}
+        </div>
+        {/* Read-only smart URL (stable per restaurant) + copy button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: r.tags.length > 0 ? 6 : 0 }}>
+          <code
+            style={{
+              fontSize: 12,
+              color: T.text,
+              background: T.chip,
+              border: `1px solid ${T.border}`,
+              borderRadius: 6,
+              padding: "2px 8px",
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            {smartPath}
+          </code>
+          <button
+            onClick={onCopy}
+            title="Copy smart URL"
+            style={{
+              padding: "2px 8px",
+              borderRadius: 6,
+              border: `1px solid ${T.border}`,
+              background: "transparent",
+              color: copied ? T.green : T.muted,
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
         </div>
         {r.tags.length > 0 && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

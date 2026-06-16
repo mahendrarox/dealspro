@@ -42,4 +42,10 @@ export interface DropItem {
   is_hero?: boolean;
   /** Admin-managed display priority (drop_items.priority). Lower comes first. */
   priority?: number;
+  /**
+   * Partner-restaurant FK (drop_items.restaurant_id). Optional for legacy
+   * drops created before the partner entity. Used by the /r/[slug] resolver
+   * to scope drops to a restaurant.
+   */
+  restaurant_id?: string | null;
 }

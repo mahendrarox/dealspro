@@ -88,6 +88,7 @@ export default async function AdminRestaurantsPage() {
             key={r.id}
             restaurant={{
               id: r.id,
+              slug: r.slug,
               name: r.name,
               city: r.city,
               tags: r.tags ?? [],

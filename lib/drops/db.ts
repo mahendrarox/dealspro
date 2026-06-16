@@ -14,7 +14,7 @@ import type { DropItem } from "./types";
 // ─── Full schema select ──────────────────────────────────────────────
 
 const DB_SELECT_COLS =
-  "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, created_at, updated_at, address, latitude, longitude";
+  "id, title, restaurant_name, image_url, price, original_price, total_spots, start_time, end_time, is_active, is_hero, priority, created_at, updated_at, address, latitude, longitude, restaurant_id";
 
 /**
  * True when a Supabase/PostgREST error is the "archived_at column does not
@@ -49,6 +49,7 @@ type DbDropRow = {
   address: string | null;
   latitude: number | null;
   longitude: number | null;
+  restaurant_id: string | null;
 };
 
 // ─── Mapper: DB row → DropItem (zero synthesis) ──────────────────────
@@ -91,21 +92,30 @@ function dbRowToDropItem(row: DbDropRow): DropItem {
     lng: row.longitude,
     is_hero: row.is_hero,
     priority: row.priority,
+    restaurant_id: row.restaurant_id ?? null,
   };
 }
 
 // ─── Public listing: active drops only, ordered in SQL ───────────────
 
-export async function getActiveDropsFromDb(): Promise<DropItem[]> {
+export async function getActiveDropsFromDb(
+  opts?: { restaurantId?: string },
+): Promise<DropItem[]> {
   // Build the base active-drops query (hero/priority/recency ordering).
-  const baseQuery = () =>
-    adminDb
+  // When `restaurantId` is provided, scope to that partner's drops; when
+  // omitted (the storefront call), the query is byte-for-byte the same as
+  // before — guaranteeing behavior-preserving convergence.
+  const baseQuery = () => {
+    let q = adminDb
       .from("drop_items")
       .select(DB_SELECT_COLS)
-      .eq("is_active", true)
+      .eq("is_active", true);
+    if (opts?.restaurantId) q = q.eq("restaurant_id", opts.restaurantId);
+    return q
       .order("is_hero", { ascending: false })
       .order("priority", { ascending: true })
       .order("created_at", { ascending: false });
+  };
 
   // Archive always wins over active: exclude any archived row from public
   // views. Fall back to the unfiltered query only if the column hasn't been

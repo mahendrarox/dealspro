@@ -19,6 +19,7 @@ import type { Restaurant, RestaurantOption } from "./restaurants/types";
 import { canPurchase, isPickupInProgress } from "@/lib/drops/helpers";
 import { dbRowToDropItem, DB_SELECT_COLS, isMissingArchivedColumn } from "@/lib/drops/db";
 import { evaluateArchive } from "./archive";
+import { slugify, resolveSlugCollision } from "@/lib/slug";
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T; noop?: boolean }
@@ -427,6 +428,26 @@ export async function getActiveRestaurantsForDropdown(): Promise<RestaurantOptio
   return data as RestaurantOption[];
 }
 
+/**
+ * Build a unique, stable restaurant slug from the display name using the
+ * shared `slugify()` + deterministic collision resolver (base, base-2, …).
+ * No random suffixes. The DB unique index is the final backstop; the
+ * create path retries on a unique-violation race (see createRestaurant).
+ */
+async function generateUniqueRestaurantSlug(name: string): Promise<string> {
+  const base = slugify(name) || "restaurant";
+  // Over-collect by prefix (also matches base-2, base-downtown, …); the
+  // resolver only needs to avoid EXACT collisions, so this is safe.
+  const { data } = await adminDb
+    .from("restaurants")
+    .select("slug")
+    .like("slug", `${base}%`);
+  const taken = new Set(
+    (data ?? []).map((r) => (r as { slug: string | null }).slug).filter(Boolean) as string[],
+  );
+  return resolveSlugCollision(base, taken);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // RESTAURANT — CREATE
 // ═══════════════════════════════════════════════════════════════════════
@@ -444,19 +465,30 @@ export async function createRestaurant(input: unknown): Promise<ActionResult<Res
     return { ok: false, error: "Validation failed", fieldErrors: flat.fieldErrors as Record<string, string[]> };
   }
 
-  const row: RestaurantCreateInput = {
-    ...parsed.data,
-    place_id: parsed.data.place_id ?? null,
-  };
+  // Generate a stable, unique slug from the name. Retry on a unique-
+  // violation race: the winning row is committed by the time we see 23505,
+  // so a recompute picks the next free suffix deterministically.
+  let data: Restaurant | null = null;
+  let error: { code?: string; message?: string } | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const slug = await generateUniqueRestaurantSlug(parsed.data.name);
+    const row = {
+      ...parsed.data,
+      place_id: parsed.data.place_id ?? null,
+      slug,
+    };
+    const res = await adminDb.from("restaurants").insert(row).select().single();
+    if (!res.error) {
+      data = res.data as Restaurant;
+      error = null;
+      break;
+    }
+    error = res.error;
+    if (res.error.code !== "23505") break; // not a slug race — give up
+  }
 
-  const { data, error } = await adminDb
-    .from("restaurants")
-    .insert(row)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("[createRestaurant] insert failed:", error.message);
+  if (error || !data) {
+    console.error("[createRestaurant] insert failed:", error?.message);
     return { ok: false, error: "Could not create restaurant" };
   }
 

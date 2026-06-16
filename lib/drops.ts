@@ -15,12 +15,18 @@ export function getPurchaseCutoff(drop: DropItem): number {
 }
 
 /**
- * A drop is active (buyable) when:
+ * CANONICAL claimable predicate — single source of truth.
+ *
+ * A drop is claimable (buyable right now) when:
  * 1. status is "live" (or missing — treat as active)
- * 2. current time < purchase cutoff (start_time)
- * 3. spotsRemaining > 0
+ * 2. current time < purchase cutoff (start_time) — ordering still open
+ * 3. spotsRemaining > 0 — not sold out
+ *
+ * Both the storefront list (via the `isActiveDrop` alias below) and the
+ * `/r/[slug]` resolver call THIS function, so the two paths can never
+ * diverge on what "claimable" means.
  */
-export function isActiveDrop(
+export function isClaimable(
   drop: DropItem,
   spotsRemaining: number,
   now: number = Date.now(),
@@ -36,6 +42,14 @@ export function isActiveDrop(
 
   return true;
 }
+
+/**
+ * Storefront-facing name for the canonical claimable predicate. Kept as a
+ * thin alias so the existing storefront call sites (DropsSection) compile
+ * and behave identically while sharing one implementation with the
+ * resolver. Do NOT fork this — change `isClaimable` instead.
+ */
+export const isActiveDrop = isClaimable;
 
 /**
  * A drop is sold-out when:

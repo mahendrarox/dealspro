@@ -10,6 +10,8 @@
 
 export type Restaurant = {
   id: string;
+  /** Stable URL slug for the public /r/[slug] smart URL. Set at creation. */
+  slug: string;
   name: string;
   city: string;
   tags: string[];

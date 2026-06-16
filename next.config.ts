@@ -24,6 +24,18 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        // The /r/[slug] smart URL resolves to live, claim-state-dependent
+        // content (and a 307 redirect when exactly one drop is claimable).
+        // Force `no-store` so a CDN never caches a redirect/list that goes
+        // stale the moment a drop sells out or a new one goes live.
+        source: "/r/:slug",
+        headers: [{ key: "Cache-Control", value: "no-store" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -1441,6 +1441,9 @@ async function main() {
     await testStudioTimezone();
     await testArchiveDrops();
     await testOptInCopy();
+    await testCanonicalClaimableAndSlug();
+    await testConsentPreservation();
+    await testSmartUrlRoute();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;
@@ -4740,6 +4743,388 @@ async function testRestaurantImageUrl() {
       fail("Drops: existing external image_url",
         res.success ? `got ${res.data.image_url}` : JSON.stringify(res.error.flatten().fieldErrors));
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 41: Canonical claimable predicate + slug utilities (pure logic)
+//   - isActiveDrop is the SAME function as isClaimable (storefront and the
+//     /r/[slug] resolver can never diverge → Homepage stays behavior-
+//     preserving).
+//   - isClaimable composes: status live + ordering-open + spots remaining.
+//   - slugify + deterministic, no-random collision resolution.
+// ═══════════════════════════════════════════════════════════════════════
+function loadDropsRoot() {
+  try { return require("../lib/drops"); } catch (err) {
+    console.log(`  [WARN] Could not load ../lib/drops: ${err.message}`);
+    return null;
+  }
+}
+function loadSlugLib() {
+  try { return require("../lib/slug"); } catch (err) {
+    console.log(`  [WARN] Could not load ../lib/slug: ${err.message}`);
+    return null;
+  }
+}
+
+async function testCanonicalClaimableAndSlug() {
+  console.log("\n── Test 41: Canonical claimable predicate + slug utils ──");
+
+  const drops = loadDropsRoot();
+  if (!drops || typeof drops.isClaimable !== "function") {
+    skip("Claimable: isActiveDrop aliases isClaimable", "lib/drops unavailable");
+    skip("Claimable: live+open+spots → true", "lib/drops unavailable");
+    skip("Claimable: sold out excluded", "lib/drops unavailable");
+    skip("Claimable: ordering-closed excluded", "lib/drops unavailable");
+    skip("Claimable: non-live status excluded", "lib/drops unavailable");
+  } else {
+    // Convergence proof: the storefront name and the resolver name are the
+    // exact same function reference — not a parallel reimplementation.
+    if (drops.isActiveDrop === drops.isClaimable) {
+      pass("Claimable: isActiveDrop === isClaimable (storefront converged)");
+    } else {
+      fail("Claimable: convergence", "isActiveDrop is not the same fn as isClaimable");
+    }
+
+    const future = Date.now() + 3600_000; // ordering open (now < start)
+    const past = Date.now() - 3600_000;   // ordering closed (now >= start)
+    const liveOpen = { status: "live", start_time_iso: new Date(future).toISOString() };
+
+    if (drops.isClaimable(liveOpen, 5) === true) pass("Claimable: live + open + spots>0 → true");
+    else fail("Claimable: live+open+spots", `got ${drops.isClaimable(liveOpen, 5)}`);
+
+    if (drops.isClaimable(liveOpen, 0) === false) pass("Claimable: sold out (spots=0) → excluded");
+    else fail("Claimable: sold out", `got ${drops.isClaimable(liveOpen, 0)}`);
+
+    const liveClosed = { status: "live", start_time_iso: new Date(past).toISOString() };
+    if (drops.isClaimable(liveClosed, 5) === false) pass("Claimable: ordering-closed → excluded");
+    else fail("Claimable: ordering-closed", `got ${drops.isClaimable(liveClosed, 5)}`);
+
+    const cancelled = { status: "cancelled", start_time_iso: new Date(future).toISOString() };
+    if (drops.isClaimable(cancelled, 5) === false) pass("Claimable: non-live status → excluded");
+    else fail("Claimable: non-live status", `got ${drops.isClaimable(cancelled, 5)}`);
+  }
+
+  const slug = loadSlugLib();
+  if (!slug || typeof slug.slugify !== "function") {
+    skip("Slug: slugify shapes", "lib/slug unavailable");
+    skip("Slug: collision is deterministic (base-2, base-3)", "lib/slug unavailable");
+    return;
+  }
+
+  // slugify shapes
+  const okSlugify =
+    slug.slugify("Tikka Grill") === "tikka-grill" &&
+    slug.slugify("  Biryani  House!! ") === "biryani-house" &&
+    slug.slugify("Café 21") === "caf-21";
+  if (okSlugify) pass("Slug: slugify lowercases, dashes spaces, strips punctuation");
+  else fail("Slug: slugify shapes",
+    `[${slug.slugify("Tikka Grill")}|${slug.slugify("  Biryani  House!! ")}|${slug.slugify("Café 21")}]`);
+
+  // deterministic collision resolution — no random suffixes
+  const taken = new Set();
+  const s1 = slug.resolveSlugCollision("biryani-house", taken); taken.add(s1);
+  const s2 = slug.resolveSlugCollision("biryani-house", taken); taken.add(s2);
+  const s3 = slug.resolveSlugCollision("biryani-house", taken); taken.add(s3);
+  if (s1 === "biryani-house" && s2 === "biryani-house-2" && s3 === "biryani-house-3") {
+    pass("Slug: collision resolves deterministically → base, base-2, base-3");
+  } else {
+    fail("Slug: collision determinism", `[${s1}|${s2}|${s3}]`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 42: Monotonic consent preservation in /api/lead
+//   Consent may only ever go UP through the lead path. Real before/after
+//   assertions against the live users table. sourceSlug is accepted but
+//   never alters consent and consent stays DealsPro-wide (one column).
+// ═══════════════════════════════════════════════════════════════════════
+async function testConsentPreservation() {
+  console.log("\n── Test 42: Monotonic Consent Preservation ──");
+
+  if (!infra.lead) {
+    [
+      "false→true on explicit opt-in",
+      "true→true on repeat omitted optIn",
+      "absent→absent when no consent",
+      "true NOT downgraded by omitted optIn",
+      "true NOT downgraded by claim form (name, no optIn)",
+      "downgrade only via STOP/admin, not lead path",
+      "sourceSlug never changes consent",
+      "no PII returned from phone lookup",
+      "name preserved on quick capture",
+    ].forEach((n) => skip(`Consent: ${n}`, "/api/lead not available"));
+    return;
+  }
+
+  const supabase = getSupabase();
+  const P = {
+    up: "+13205550061",
+    sticky: "+13205550062",
+    absent: "+13205550063",
+    claim: "+13205550064",
+    admin: "+13205550065",
+    src: "+13205550066",
+    pii: "+13205550067",
+    nm: "+13205550068",
+  };
+  const all = Object.values(P);
+  await supabase.from("users").delete().in("phone", all);
+
+  const post = (body) =>
+    fetchWithRetry(`${BASE_URL}/api/lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const consentOf = async (phone) => {
+    const { data } = await supabase.from("users").select("consent").eq("phone", phone).maybeSingle();
+    return data ? data.consent : undefined;
+  };
+  const nameOf = async (phone) => {
+    const { data } = await supabase.from("users").select("name").eq("phone", phone).maybeSingle();
+    return data ? data.name : undefined;
+  };
+
+  try {
+    // 1. false/null → true on explicit opt-in
+    await post({ phone: P.up, optIn: true });
+    if ((await consentOf(P.up)) === true) pass("Consent: false→true on explicit opt-in");
+    else fail("Consent: false→true", `consent=${await consentOf(P.up)}`);
+
+    // 2. true → true on repeat visit with omitted optIn (THE fix)
+    await post({ phone: P.sticky, optIn: true });
+    await post({ phone: P.sticky }); // returning visit, no checkbox
+    if ((await consentOf(P.sticky)) === true) pass("Consent: true→true on repeat with omitted optIn");
+    else fail("Consent: true→true repeat", `consent=${await consentOf(P.sticky)}`);
+
+    // 3. absent → absent when no consent ever given (must NOT be true)
+    await post({ phone: P.absent });
+    if ((await consentOf(P.absent)) !== true) pass("Consent: no-consent stays not-true");
+    else fail("Consent: absent stays absent", `consent=${await consentOf(P.absent)}`);
+
+    // 4 & 5. true must NOT be downgraded by a claim form that omits consent
+    await post({ phone: P.claim, optIn: true });
+    await post({ phone: P.claim, name: "Returning Claimer" }); // claim form, no optIn
+    if ((await consentOf(P.claim)) === true) pass("Consent: true NOT downgraded by claim form omitting optIn");
+    else fail("Consent: claim-form downgrade", `consent=${await consentOf(P.claim)}`);
+
+    // 6. only STOP/admin can downgrade; the lead path never resurrects it
+    await post({ phone: P.admin, optIn: true });
+    await supabase.from("users").update({ consent: false }).eq("phone", P.admin); // admin/STOP
+    const afterAdmin = await consentOf(P.admin);
+    await post({ phone: P.admin }); // returning visit, no optIn
+    const afterReturn = await consentOf(P.admin);
+    if (afterAdmin === false && afterReturn === false) {
+      pass("Consent: downgrade only via admin/STOP; lead path doesn't resurrect");
+    } else {
+      fail("Consent: admin downgrade path", `afterAdmin=${afterAdmin}, afterReturn=${afterReturn}`);
+    }
+
+    // 7. sourceSlug accepted but never changes consent behavior
+    await post({ phone: P.src, optIn: true });
+    await post({ phone: P.src, sourceSlug: "tikka-grill" }); // attribution only, no optIn
+    if ((await consentOf(P.src)) === true) pass("Consent: sourceSlug never changes consent (stays DealsPro-wide)");
+    else fail("Consent: sourceSlug neutrality", `consent=${await consentOf(P.src)}`);
+
+    // 8. no PII returned from a phone lookup (response carries no name)
+    const r = await post({ phone: P.pii, optIn: true });
+    let body = {};
+    try { body = await r.json(); } catch { /* ignore */ }
+    if (body.success === true && body.name === undefined && typeof body.user_id !== "undefined") {
+      pass("Consent: /api/lead response exposes no PII (no name field)");
+    } else {
+      fail("Consent: no-PII response", JSON.stringify(body));
+    }
+
+    // 9. name preserved on a later name-less quick capture.
+    //    Steps avoid the full-form branch so no SMS is attempted.
+    await post({ phone: P.nm, optIn: true });   // consent=true, placeholder name
+    await post({ phone: P.nm, name: "Alice" }); // quick capture sets real name
+    await post({ phone: P.nm });                // name-less capture must preserve it
+    if ((await nameOf(P.nm)) === "Alice") pass("Consent: existing name preserved on name-less capture");
+    else fail("Consent: name preservation", `name=${await nameOf(P.nm)}`);
+  } finally {
+    await supabase.from("users").delete().in("phone", all);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 43: /r/[slug] smart URL — route states, eligibility, 404, no-store
+//   DB/state tests gated on migration-008 (restaurants.slug). Unknown-slug
+//   → 404 holds regardless of migration state.
+// ═══════════════════════════════════════════════════════════════════════
+async function testSmartUrlRoute() {
+  console.log("\n── Test 43: /r/[slug] Smart URL ──");
+
+  // Unknown / bogus slug → 404 (always — capture is only for a real
+  // restaurant with zero claimable drops).
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/r/__no-such-restaurant-${Date.now()}`, { redirect: "manual" });
+    if (res.status === 404) pass("Smart URL: unknown slug → 404");
+    else fail("Smart URL: unknown slug", `expected 404, got ${res.status}`);
+  } catch (err) {
+    fail("Smart URL: unknown slug", err.message);
+  }
+
+  const supabase = getSupabase();
+  const slugProbe = await supabase.from("restaurants").select("slug").limit(1);
+  if (slugProbe.error) {
+    [
+      "0 claimable → capture state",
+      "capture imports centralized opt-in copy",
+      "capture exposes no returning-user PII",
+      "1 claimable → 307 + no-store",
+      "2+ claimable → list of links",
+      "archived/inactive/sold-out/ordering-closed excluded",
+      "existing restaurants have slugs (backfill)",
+    ].forEach((n) => skip(`Smart URL: ${n}`, "restaurants.slug not migrated (apply migration-008 + backfill)"));
+    return;
+  }
+
+  // Backfill assertion: once migrated AND backfilled, no restaurant should
+  // have a NULL slug. If some are null, the backfill step hasn't been run.
+  {
+    const { count } = await supabase
+      .from("restaurants")
+      .select("id", { count: "exact", head: true })
+      .is("slug", null);
+    if (count === 0) pass("Smart URL: all existing restaurants have slugs (backfill complete)");
+    else skip("Smart URL: existing restaurants have slugs", `${count} NULL slugs — run scripts/backfill-restaurant-slugs.ts`);
+  }
+
+  const stamp = Date.now();
+  const slug = `test-smarturl-${stamp}`;
+  const phone = `+13405550099`;
+  let restId = null;
+  const dropIds = [];
+  const mkDrop = (over) => ({
+    id: `test-su-${over.k}-${stamp}`,
+    title: over.title || `Drop ${over.k}`,
+    restaurant_name: "SmartURL Test Kitchen",
+    restaurant_id: restId,
+    price: 9.99,
+    total_spots: over.total_spots ?? 10,
+    start_time: over.start || new Date(stamp + 24 * 3600_000).toISOString(),
+    end_time: over.end || new Date(stamp + 48 * 3600_000).toISOString(),
+    is_active: over.is_active ?? true,
+    archived_at: over.archived_at ?? null,
+  });
+
+  try {
+    // Seed an active restaurant with a known slug.
+    const { data: rest, error: rErr } = await supabase
+      .from("restaurants")
+      .insert({
+        name: "SmartURL Test Kitchen",
+        slug,
+        city: "Frisco",
+        tags: [`test-smarturl-${stamp}`],
+        address: "1 Test Rd, Frisco, TX",
+        latitude: 33.1,
+        longitude: -96.8,
+        place_id: null,
+        is_active: true,
+      })
+      .select()
+      .single();
+    if (rErr || !rest) { fail("Smart URL: seed restaurant", rErr?.message || "no row"); return; }
+    restId = rest.id;
+
+    // ── State 1: zero claimable drops → capture state ──
+    {
+      const res = await fetchWithRetry(`${BASE_URL}/r/${slug}`, { redirect: "manual" });
+      const html = await res.text();
+      if (res.status === 200 && html.includes("Get DealsPro Drop Alerts") && html.includes("No live drops at")) {
+        pass("Smart URL: 0 claimable → capture state");
+      } else {
+        fail("Smart URL: 0 claimable capture", `status=${res.status} hasTitle=${html.includes("Get DealsPro Drop Alerts")}`);
+      }
+      // centralized copy marker (canonical short consent label)
+      if (html.includes("I agree to receive DealsPro marketing text alerts.")) {
+        pass("Smart URL: capture imports centralized opt-in copy");
+      } else {
+        fail("Smart URL: centralized copy", "missing canonical consent label");
+      }
+      // privacy: never reveal a returning user by name
+      if (!/welcome back/i.test(html)) pass("Smart URL: capture exposes no returning-user PII");
+      else fail("Smart URL: PII", "'welcome back' present in capture HTML");
+      if ((res.headers.get("cache-control") || "").includes("no-store")) {
+        pass("Smart URL: capture response is Cache-Control: no-store");
+      } else {
+        fail("Smart URL: capture no-store", `cache-control=${res.headers.get("cache-control")}`);
+      }
+    }
+
+    // ── State 2: exactly one claimable drop → 307 + no-store ──
+    {
+      const d = mkDrop({ k: "one", title: "Only Claimable" });
+      const ins = await supabase.from("drop_items").insert(d);
+      if (ins.error) { fail("Smart URL: seed 1-drop", ins.error.message); return; }
+      dropIds.push(d.id);
+
+      const res = await fetchWithRetry(`${BASE_URL}/r/${slug}`, { redirect: "manual" });
+      const loc = res.headers.get("location") || "";
+      const cc = res.headers.get("cache-control") || "";
+      if (res.status === 307 && loc.endsWith(`/drop/${d.id}`)) {
+        pass("Smart URL: 1 claimable → 307 redirect to the drop");
+      } else {
+        fail("Smart URL: 1 claimable redirect", `status=${res.status} location=${loc}`);
+      }
+      if (cc.includes("no-store")) pass("Smart URL: redirect carries Cache-Control: no-store");
+      else fail("Smart URL: redirect no-store", `cache-control=${cc}`);
+    }
+
+    // ── State 3: 2+ claimable drops → list of links ──
+    {
+      const d2 = mkDrop({ k: "two", title: "Second Claimable" });
+      const ins = await supabase.from("drop_items").insert(d2);
+      if (ins.error) { fail("Smart URL: seed 2nd drop", ins.error.message); return; }
+      dropIds.push(d2.id);
+
+      const res = await fetchWithRetry(`${BASE_URL}/r/${slug}`, { redirect: "manual" });
+      const html = await res.text();
+      const hasBoth = html.includes(`/drop/${dropIds[0]}`) && html.includes(`/drop/${dropIds[1]}`);
+      if (res.status === 200 && hasBoth) pass("Smart URL: 2+ claimable → list of drop links");
+      else fail("Smart URL: 2+ list", `status=${res.status} hasBoth=${hasBoth}`);
+    }
+
+    // ── Eligibility: archived / inactive / sold-out / ordering-closed excluded ──
+    {
+      const archived = mkDrop({ k: "arch", archived_at: new Date().toISOString() });
+      const inactive = mkDrop({ k: "inact", is_active: false });
+      const closed = mkDrop({ k: "closed", start: new Date(stamp - 3600_000).toISOString(), end: new Date(stamp + 3600_000).toISOString() });
+      const soldout = mkDrop({ k: "sold", total_spots: 1 });
+      for (const d of [archived, inactive, closed, soldout]) {
+        const ins = await supabase.from("drop_items").insert(d);
+        if (ins.error) { fail("Smart URL: seed eligibility", ins.error.message); return; }
+        dropIds.push(d.id);
+      }
+      // consume the sold-out drop's only spot with a paid order
+      const so = await supabase.from("orders").insert({
+        stripe_session_id: testId(), phone, drop_item_id: soldout.id,
+        drop_title: soldout.title, restaurant_name: "SmartURL Test Kitchen",
+        price_paid: 9.99, quantity: 1, qr_token: testId(),
+        status: "paid", redemption_status: "pending",
+      });
+      if (so.error) { fail("Smart URL: seed paid order", so.error.message); return; }
+
+      const res = await fetchWithRetry(`${BASE_URL}/r/${slug}`, { redirect: "manual" });
+      const html = await res.text();
+      const leaked = [archived, inactive, closed, soldout].filter((d) => html.includes(`/drop/${d.id}`));
+      const stillTwo = html.includes("2 live drops");
+      if (res.status === 200 && leaked.length === 0 && stillTwo) {
+        pass("Smart URL: archived/inactive/sold-out/ordering-closed all excluded");
+      } else {
+        fail("Smart URL: eligibility exclusion", `status=${res.status} leaked=${leaked.map((d)=>d.k).join(",")} stillTwo=${stillTwo}`);
+      }
+    }
+  } catch (err) {
+    fail("Smart URL: route", err.message);
+  } finally {
+    await supabase.from("orders").delete().eq("phone", phone);
+    if (dropIds.length) await supabase.from("drop_items").delete().in("id", dropIds);
+    if (restId) await supabase.from("restaurants").delete().eq("id", restId);
   }
 }
 

@@ -8,6 +8,8 @@
  * helpers as client-only and breaking SSR.
  */
 
+import { slugify } from "@/lib/slug";
+
 export type LocationMode = "autocomplete" | "manual";
 
 /**
@@ -202,16 +204,10 @@ export function isoToLocal(iso: string): string {
   return `${m.year}-${m.month}-${m.day}T${hour}:${m.minute}`;
 }
 
-/** Slugify a string for use in a drop ID. */
-export function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9-\s]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+// Slugify is the canonical shared util in `lib/slug.ts`. Imported for local
+// use (suggestDropSlug) and re-exported so existing imports
+// (`./form-utils`) keep working unchanged.
+export { slugify };
 
 /** Build a reasonable default drop slug from restaurant + title + start date. */
 export function suggestDropSlug(opts: {
