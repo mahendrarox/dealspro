@@ -6,7 +6,6 @@ import {
   formatTimeWindow,
   formatDate,
   getTimeContext,
-  getDiscountPct,
   canPurchase,
   isPickupInProgress,
   hasEnded,
@@ -23,12 +22,14 @@ import {
 
 const T = {
   color: {
-    blue50: "#EFF4FF", blue100: "#DBEAFE", blue400: "#3B82F6",
-    blue500: "#2563EB", blue600: "#1D4ED8", blue700: "#1E40AF",
-    red50: "#FEE2E0", red100: "#F9A29A", red500: "#F93A25",
+    // DealsPro fire accent (red/orange). CTA buttons are black (ink).
+    fire50: "#FFF1EC", fire100: "#FFE0D4", orange400: "#FB8C3C",
+    fire500: "#F93A25", fire600: "#E0311F", fire700: "#C72A1A",
+    red50: "#FFF1EC", red100: "#F9A29A", red500: "#F93A25",
     red600: "#E0311F", red700: "#C72A1A",
     green50: "#DCFCE7", green500: "#16A34A",
     amber50: "#FEF3C7", amber500: "#D97706",
+    ink: "#161616",
     n0: "#FFFFFF", n50: "#F7F7F8", n200: "#E4E4E7", n300: "#D4D4D8",
     n400: "#A1A1AA", n500: "#52525B", n800: "#1C1C21",
     n900: "#18181B", n950: "#111114",
@@ -37,8 +38,8 @@ const T = {
   shadow: {
     sm: "0 1px 2px rgba(0,0,0,0.05)",
     md: "0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05)",
-    deal: "0 4px 20px rgba(37,99,235,0.12)",
-    dealHover: "0 12px 36px rgba(37,99,235,0.22)",
+    deal: "0 10px 30px rgba(24,24,24,0.10)",
+    dealHover: "0 18px 44px rgba(24,24,24,0.16)",
   },
   radius: { sm: "6px", md: "8px", lg: "12px", xl: "16px", xxl: "24px", full: "9999px" },
   tr: { fast: "150ms ease", base: "200ms ease", spring: "300ms cubic-bezier(0.34,1.56,0.64,1)" },
@@ -65,7 +66,7 @@ function useInView() {
 // ── Sub-components ──
 
 function Badge({ type = "drop", children }: { type?: "drop" | "savings" | "soldOut"; children: React.ReactNode }) {
-  const s = { drop: { bg: T.color.blue500, c: "#fff" }, savings: { bg: T.color.green50, c: T.color.green500 }, soldOut: { bg: T.color.n200, c: T.color.n400 } }[type] || { bg: T.color.blue500, c: "#fff" };
+  const s = { drop: { bg: T.color.fire50, c: T.color.fire700 }, savings: { bg: T.color.green50, c: T.color.green500 }, soldOut: { bg: T.color.n200, c: T.color.n400 } }[type] || { bg: T.color.fire50, c: T.color.fire700 };
   return <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 12px", borderRadius: T.radius.full, background: s.bg, color: s.c, display: "inline-block" }}>{children}</span>;
 }
 
@@ -74,7 +75,7 @@ function Btn({ children, full, disabled }: { children: React.ReactNode; full?: b
   const base: React.CSSProperties = { fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", cursor: disabled ? "not-allowed" : "pointer", borderRadius: T.radius.lg, transition: `all ${T.tr.base}`, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "14px 28px", width: full ? "100%" : undefined };
   const v = disabled
     ? { background: T.color.n200, color: T.color.n400 }
-    : { background: h ? T.color.blue600 : T.color.blue500, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
+    : { background: h ? "#000000" : T.color.ink, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
   return <button onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)} style={{ ...base, ...v }}>{children}</button>;
 }
 
@@ -86,7 +87,6 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
   const sold = remaining <= 0;
   const ended = hasEnded(item);
   const pickupActive = isPickupInProgress(item);
-  const pct = getDiscountPct(item);
   const timeCtx = getTimeContext(item);
   const disabled = sold || ended || pickupActive;
 
@@ -121,7 +121,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
     critical: "linear-gradient(90deg, #F93A25, #FF6B5A)",
     last: "linear-gradient(90deg, #F93A25, #FF6B5A)",
     medium: "linear-gradient(90deg, #FF9500, #FFB347)",
-    normal: "linear-gradient(90deg, rgba(37,99,235,0.4), rgba(37,99,235,0.65))",
+    normal: "linear-gradient(90deg, #FB8C3C, #F93A25)",
   }[tier];
 
   // ── Card styles (sold-out fully disabled) ──
@@ -162,11 +162,10 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
           )}
           <div style={{ fontFamily: T.font.mono, fontSize: "12px", color: T.color.n400, marginTop: "4px" }}>⏰ {formatTimeWindow(item)}</div>
         </div>
-        {/* Pricing */}
+        {/* Pricing — single prepaid price (premium, no coupon-style % off) */}
         <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: T.font.mono, fontSize: "32px", fontWeight: 800, color: T.color.blue500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
-          <span style={{ fontFamily: T.font.mono, fontSize: "16px", color: T.color.n400, textDecoration: "line-through" }}>${item.original_price.toFixed(2)}</span>
-          <Badge type="savings">{pct}% OFF</Badge>
+          <span style={{ fontFamily: T.font.mono, fontSize: "32px", fontWeight: 800, color: T.color.n900, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
+          <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.n400 }}>prepaid · pickup</span>
         </div>
         {/* Progress bar */}
         <div style={{ width: "100%", height: 6, borderRadius: "9999px", background: T.color.n200, overflow: "hidden", marginTop: "12px" }}>
@@ -178,13 +177,13 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
             {pulseColor && <span style={{ width: 8, height: 8, borderRadius: "50%", background: pulseColor, display: "inline-block", animation: "pulseDot 1.5s ease-in-out infinite" }} />}
             {statusText}
           </span>
-          {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.blue500, background: T.color.blue50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
+          {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.fire700, background: T.color.fire50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
         </div>
         {/* CTA */}
         {sold ? (
           <button style={{ width: "100%", fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", borderRadius: T.radius.lg, padding: "14px 28px", background: "#555", color: "rgba(255,255,255,0.5)", cursor: "default", opacity: 0.7 }}>Sold Out</button>
         ) : (
-          <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : "Ordering Closed") : `Claim Spot for $${item.price.toFixed(2)}`}</Btn>
+          <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : "Ordering Closed") : `Reserve · $${item.price.toFixed(2)}`}</Btn>
         )}
       </div>
     </div>
@@ -196,7 +195,7 @@ function SectionHeader({ label, title }: { label: string; title: string }) {
   const [ref, vis] = useInView();
   return (
     <div ref={ref} style={{ textAlign: "center", marginBottom: "48px", opacity: vis ? 1 : 0, animation: vis ? "fadeUp 0.5s ease both" : "none" }}>
-      <div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: T.color.blue500, marginBottom: "12px" }}>{label}</div>
+      <div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: T.color.fire600, marginBottom: "12px" }}>{label}</div>
       <h2 style={{ fontFamily: T.font.display, fontSize: "clamp(24px, 4vw, 36px)", fontWeight: 700, lineHeight: 1.2, letterSpacing: "-0.02em", color: T.color.n900 }}>{title}</h2>
     </div>
   );
@@ -220,12 +219,92 @@ function Shimmer() {
   );
 }
 
+// ── Sample drops showcase ─────────────────────────────────────────────
+// Premium static cards shown when there are no live DB drops yet, so the
+// "Live drops near you" section always presents the product the way the
+// reference design intends. Real DB drops (when active) render instead via
+// <DropCard/> above. "Reserve" routes to the opt-in so visitors get alerted
+// the moment real drops go live.
+const SAMPLE_DROPS = [
+  { tag: "DROP EXCLUSIVE", title: "Family Biryani Drop", place: "Sai Gayatri · Frisco", left: "Only 12 left", pickup: "Pickup Fri 6–8pm", price: "$39", detail: "Feeds 4–5", emoji: "🍛", grad: "linear-gradient(135deg, #F93A25, #FB8C3C)" },
+  { tag: "WEEKEND ONLY", title: "BBQ Family Platter", place: "Smokey's · Prosper", left: "Only 6 left", pickup: "Pickup Sat 12–2pm", price: "$45", detail: "Feeds 4", emoji: "🍖", grad: "linear-gradient(135deg, #C72A1A, #F97316)" },
+  { tag: "LIMITED BATCH", title: "Weekend Dessert Box", place: "Sweet Lane · Frisco", left: "Only 8 left", pickup: "Pickup Sun 10am–12pm", price: "$24", detail: "6 pieces", emoji: "🧁", grad: "linear-gradient(135deg, #E0311F, #FBBF24)" },
+];
+
+function SampleDropCard({ d, delay }: { d: typeof SAMPLE_DROPS[number]; delay: number }) {
+  const [h, setH] = useState(false);
+  const [ref, vis] = useInView();
+  return (
+    <a href="#get-deals" style={{ textDecoration: "none", display: "block" }}>
+      <div
+        ref={ref}
+        onMouseEnter={() => setH(true)}
+        onMouseLeave={() => setH(false)}
+        style={{
+          background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden",
+          border: `1px solid ${T.color.n200}`,
+          boxShadow: h ? T.shadow.dealHover : T.shadow.deal,
+          transform: h ? "translateY(-4px)" : "none",
+          transition: `all ${T.tr.spring}`,
+          opacity: vis ? 1 : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none",
+          height: "100%", display: "flex", flexDirection: "column",
+        }}
+      >
+        {/* Image area (gradient placeholder) */}
+        <div style={{ position: "relative", height: 176, background: d.grad, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: "64px", filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.25))" }}>{d.emoji}</span>
+          <div style={{ position: "absolute", top: 12, left: 12 }}>
+            <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", padding: "5px 12px", borderRadius: T.radius.full, background: "rgba(255,255,255,0.92)", color: T.color.fire700, display: "inline-block" }}>{d.tag}</span>
+          </div>
+          <div style={{ position: "absolute", top: 12, right: 12 }}>
+            <span style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 800, padding: "5px 12px", borderRadius: T.radius.full, background: T.color.fire50, color: T.color.fire600, border: `1px solid ${T.color.fire100}`, display: "inline-block" }}>{d.left}</span>
+          </div>
+        </div>
+        {/* Content */}
+        <div style={{ padding: "16px 18px 18px", display: "flex", flexDirection: "column", flex: 1 }}>
+          <div style={{ fontFamily: T.font.display, fontSize: "19px", fontWeight: 700, color: T.color.n900, lineHeight: 1.25 }}>{d.title}</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n500, marginTop: "4px" }}>{d.place}</div>
+          <div style={{ fontFamily: T.font.mono, fontSize: "12px", color: T.color.n400, marginTop: "8px" }}>⏰ {d.pickup}</div>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: "14px" }}>
+            <span style={{ fontFamily: T.font.mono, fontSize: "28px", fontWeight: 800, color: T.color.n900, lineHeight: 1 }}>{d.price}</span>
+            <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.n500 }}>{d.detail}</span>
+          </div>
+          <div style={{ marginTop: "16px", marginBottom: 0, flex: 0 }}>
+            <button style={{
+              width: "100%", fontFamily: T.font.display, fontWeight: 700, fontSize: "15px", letterSpacing: "0.02em",
+              border: "none", borderRadius: T.radius.lg, padding: "14px 20px",
+              background: h ? "#000000" : T.color.ink, color: "#fff", cursor: "pointer",
+              boxShadow: h ? T.shadow.md : T.shadow.sm, transition: `all ${T.tr.base}`,
+            }}>Reserve</button>
+          </div>
+        </div>
+      </div>
+    </a>
+  );
+}
+
+function SampleDrops() {
+  return (
+    <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}>
+      <style>{`@media(max-width:900px){.drops-grid{grid-template-columns:1fr 1fr!important}}@media(max-width:600px){.drops-grid{grid-template-columns:1fr!important;max-width:400px;margin:0 auto}}`}</style>
+      <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
+        <SectionHeader label="Live drops" title="Live drops near you" />
+        <div className="drops-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "24px", alignItems: "stretch" }}>
+          {SAMPLE_DROPS.map((d, i) => <SampleDropCard key={d.title} d={d} delay={i * 120} />)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Exported spot data for hero featured card ──
 
 export interface DropsData {
   featured: DropItem | null;
   spotsMap: Record<string, number>;
   loading: boolean;
+  /** Count of genuinely active (claimable) drops — powers the hero live badge. */
+  activeCount: number;
 }
 
 // ── Main component ──
@@ -306,7 +385,7 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
   // Notify parent of computed data (for hero featured card)
   useEffect(() => {
     if (onData) {
-      onData({ featured, spotsMap: spots, loading });
+      onData({ featured, spotsMap: spots, loading, activeCount: activeDrops.length });
     }
   }, [featured?.id, loading, spotsMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -335,20 +414,11 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
     );
   }
 
-  // Case A: No active AND no sold-out drops
+  // Case A: No active AND no sold-out drops → premium sample showcase so the
+  // "Live drops near you" section always presents the product (real DB drops
+  // replace these the moment any go live).
   if (activeDrops.length === 0 && soldOutDrops.length === 0) {
-    return (
-      <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}>
-        <div style={{ maxWidth: "1120px", margin: "0 auto", textAlign: "center" }}>
-          <div style={{ fontFamily: T.font.display, fontSize: "clamp(24px, 4vw, 36px)", fontWeight: 700, lineHeight: 1.2, letterSpacing: "-0.02em", color: T.color.n900, marginBottom: "16px" }}>
-            New drops coming soon
-          </div>
-          <p style={{ fontFamily: T.font.display, fontSize: "16px", lineHeight: 1.6, color: T.color.n500, maxWidth: "480px", margin: "0 auto" }}>
-            You'll be the first to know when the next drop goes live.
-          </p>
-        </div>
-      </section>
-    );
+    return <SampleDrops />;
   }
 
   // Case B: All drops sold out
