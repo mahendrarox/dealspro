@@ -23,6 +23,8 @@ import {
 
 const T = {
   color: {
+    blue50: "#EFF4FF", blue100: "#DBEAFE", blue400: "#3B82F6",
+    blue500: "#2563EB", blue600: "#1D4ED8", blue700: "#1E40AF",
     red50: "#FEE2E0", red100: "#F9A29A", red500: "#F93A25",
     red600: "#E0311F", red700: "#C72A1A",
     green50: "#DCFCE7", green500: "#16A34A",
@@ -35,8 +37,8 @@ const T = {
   shadow: {
     sm: "0 1px 2px rgba(0,0,0,0.05)",
     md: "0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05)",
-    deal: "0 4px 20px rgba(249,58,37,0.12)",
-    dealHover: "0 8px 30px rgba(249,58,37,0.2)",
+    deal: "0 4px 20px rgba(37,99,235,0.12)",
+    dealHover: "0 12px 36px rgba(37,99,235,0.22)",
   },
   radius: { sm: "6px", md: "8px", lg: "12px", xl: "16px", xxl: "24px", full: "9999px" },
   tr: { fast: "150ms ease", base: "200ms ease", spring: "300ms cubic-bezier(0.34,1.56,0.64,1)" },
@@ -63,7 +65,7 @@ function useInView() {
 // ── Sub-components ──
 
 function Badge({ type = "drop", children }: { type?: "drop" | "savings" | "soldOut"; children: React.ReactNode }) {
-  const s = { drop: { bg: T.color.red500, c: "#fff" }, savings: { bg: T.color.green50, c: T.color.green500 }, soldOut: { bg: T.color.n200, c: T.color.n400 } }[type] || { bg: T.color.red500, c: "#fff" };
+  const s = { drop: { bg: T.color.blue500, c: "#fff" }, savings: { bg: T.color.green50, c: T.color.green500 }, soldOut: { bg: T.color.n200, c: T.color.n400 } }[type] || { bg: T.color.blue500, c: "#fff" };
   return <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 12px", borderRadius: T.radius.full, background: s.bg, color: s.c, display: "inline-block" }}>{children}</span>;
 }
 
@@ -72,7 +74,7 @@ function Btn({ children, full, disabled }: { children: React.ReactNode; full?: b
   const base: React.CSSProperties = { fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", cursor: disabled ? "not-allowed" : "pointer", borderRadius: T.radius.lg, transition: `all ${T.tr.base}`, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "14px 28px", width: full ? "100%" : undefined };
   const v = disabled
     ? { background: T.color.n200, color: T.color.n400 }
-    : { background: h ? T.color.red600 : T.color.red500, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
+    : { background: h ? T.color.blue600 : T.color.blue500, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
   return <button onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)} style={{ ...base, ...v }}>{children}</button>;
 }
 
@@ -119,7 +121,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
     critical: "linear-gradient(90deg, #F93A25, #FF6B5A)",
     last: "linear-gradient(90deg, #F93A25, #FF6B5A)",
     medium: "linear-gradient(90deg, #FF9500, #FFB347)",
-    normal: "linear-gradient(90deg, rgba(249,58,37,0.35), rgba(249,58,37,0.55))",
+    normal: "linear-gradient(90deg, rgba(37,99,235,0.4), rgba(37,99,235,0.65))",
   }[tier];
 
   // ── Card styles (sold-out fully disabled) ──
@@ -162,7 +164,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
         </div>
         {/* Pricing */}
         <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: T.font.mono, fontSize: "32px", fontWeight: 800, color: T.color.red500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
+          <span style={{ fontFamily: T.font.mono, fontSize: "32px", fontWeight: 800, color: T.color.blue500, lineHeight: 1 }}>${item.price.toFixed(2)}</span>
           <span style={{ fontFamily: T.font.mono, fontSize: "16px", color: T.color.n400, textDecoration: "line-through" }}>${item.original_price.toFixed(2)}</span>
           <Badge type="savings">{pct}% OFF</Badge>
         </div>
@@ -176,7 +178,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
             {pulseColor && <span style={{ width: 8, height: 8, borderRadius: "50%", background: pulseColor, display: "inline-block", animation: "pulseDot 1.5s ease-in-out infinite" }} />}
             {statusText}
           </span>
-          {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.red500, background: T.color.red50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
+          {!disabled && <span style={{ fontFamily: T.font.mono, fontSize: "12px", fontWeight: 700, color: T.color.blue500, background: T.color.blue50, padding: "4px 10px", borderRadius: T.radius.full }}>{timeCtx}</span>}
         </div>
         {/* CTA */}
         {sold ? (
@@ -194,7 +196,7 @@ function SectionHeader({ label, title }: { label: string; title: string }) {
   const [ref, vis] = useInView();
   return (
     <div ref={ref} style={{ textAlign: "center", marginBottom: "48px", opacity: vis ? 1 : 0, animation: vis ? "fadeUp 0.5s ease both" : "none" }}>
-      <div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: T.color.red500, marginBottom: "12px" }}>{label}</div>
+      <div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: T.color.blue500, marginBottom: "12px" }}>{label}</div>
       <h2 style={{ fontFamily: T.font.display, fontSize: "clamp(24px, 4vw, 36px)", fontWeight: 700, lineHeight: 1.2, letterSpacing: "-0.02em", color: T.color.n900 }}>{title}</h2>
     </div>
   );
@@ -326,7 +328,7 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
     return (
       <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}>
         <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
-          <SectionHeader label="This Week's Drops" title="Active Drops Near You" />
+          <SectionHeader label="Live drops" title="Live drops near you" />
           <Shimmer />
         </div>
       </section>
@@ -342,7 +344,7 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
             New drops coming soon
           </div>
           <p style={{ fontFamily: T.font.display, fontSize: "16px", lineHeight: 1.6, color: T.color.n500, maxWidth: "480px", margin: "0 auto" }}>
-            You'll be the first to know when the next deal goes live.
+            You'll be the first to know when the next drop goes live.
           </p>
         </div>
       </section>
@@ -375,11 +377,11 @@ export default function DropsSection({ drops, onData }: DropsSectionProps) {
     <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}>
       <PulseDotStyle />
       <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
-        <SectionHeader label="This Week's Drops" title="Active Drops Near You" />
+        <SectionHeader label="Live drops" title="Live drops near you" />
         {!coords && !denied && (
           <div style={{ textAlign: "center", marginBottom: "24px" }}>
             <button onClick={requestLocation} disabled={locLoading} style={{ background: T.color.n0, border: `1px solid ${T.color.n200}`, borderRadius: T.radius.full, padding: "10px 20px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.n500, cursor: locLoading ? "default" : "pointer", transition: `all ${T.tr.base}`, boxShadow: T.shadow.sm }}>
-              {locLoading ? "Getting location..." : "📍 Find deals closest to you"}
+              {locLoading ? "Getting location..." : "📍 Find drops closest to you"}
             </button>
           </div>
         )}

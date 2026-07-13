@@ -789,7 +789,7 @@ async function testPageRenders() {
   console.log("\n── Test 10: Page Render Validation ──");
 
   const pages = [
-    { url: "/", expect: 200, contains: "Exclusive Restaurant Deals", name: "Homepage" },
+    { url: "/", expect: 200, contains: "restaurant drops", name: "Homepage" },
     { url: "/drop/drop-biryani-apr07", expect: 200, contains: "Biryani Night", name: "Drop page" },
     { url: "/ticket/success", expect: 200, contains: null, name: "Success page (no session)", infraKey: "successPage" },
     { url: "/scan", expect: 200, contains: "Redeem", name: "Scan page" },
@@ -3865,14 +3865,14 @@ async function testOptInCopy() {
   if (leftover.length === 0) pass("Opt-in #5: rendered homepage no longer contains old opt-in copy");
   else fail("Opt-in #5: old copy still rendered", JSON.stringify(leftover));
 
-  // #7 hero H1 unchanged. The H1 wraps "Limited Drops." in a <span>, so the
+  // #7 hero H1 present. The H1 wraps "Gone fast." in a gradient <span>, so the
   // plain string isn't contiguous in HTML — assert the three fragments.
   if (
-    html.includes("Exclusive Restaurant Deals.") &&
-    html.includes("Limited Drops.") &&
-    html.includes("Sent to Your Phone.")
+    html.includes("Premium restaurant drops.") &&
+    html.includes("Limited. Prepaid.") &&
+    html.includes("Gone fast.")
   )
-    pass("Opt-in #7: hero H1 unchanged");
+    pass("Opt-in #7: hero H1 present (drops rebrand)");
   else fail("Opt-in #7: hero H1", "hero H1 changed or missing");
 
   // #8 Submit button is a static CTA "Get drop alerts" with no dynamic

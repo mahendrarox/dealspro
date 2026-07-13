@@ -20,6 +20,10 @@ import {
 
 const T = {
   color: {
+    // ── Primary accent: premium blue (drops network rebrand) ──
+    blue50: "#EFF4FF", blue100: "#DBEAFE", blue400: "#3B82F6",
+    blue500: "#2563EB", blue600: "#1D4ED8", blue700: "#1E40AF",
+    // Legacy red tokens retained for any incidental references.
     red50: "#FEE2E0", red100: "#F9A29A", red500: "#F93A25",
     red600: "#E0311F", red700: "#C72A1A",
     green50: "#DCFCE7", green500: "#16A34A",
@@ -32,9 +36,9 @@ const T = {
   shadow: {
     sm: "0 1px 2px rgba(0,0,0,0.05)",
     md: "0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05)",
-    deal: "0 4px 20px rgba(249,58,37,0.12)",
-    dealHover: "0 8px 30px rgba(249,58,37,0.2)",
-    focus: "0 0 0 3px rgba(249,58,37,0.3)",
+    deal: "0 4px 20px rgba(37,99,235,0.12)",
+    dealHover: "0 12px 36px rgba(37,99,235,0.22)",
+    focus: "0 0 0 3px rgba(37,99,235,0.3)",
   },
   radius: { sm: "6px", md: "8px", lg: "12px", xl: "16px", xxl: "24px", full: "9999px" },
   tr: { fast: "150ms ease", base: "200ms ease", spring: "300ms cubic-bezier(0.34,1.56,0.64,1)" },
@@ -43,12 +47,13 @@ const T = {
 const css = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
-  ::selection { background: ${T.color.red50}; color: ${T.color.red700}; }
+  ::selection { background: ${T.color.blue100}; color: ${T.color.blue700}; }
   @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+  @keyframes floatSlow { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-14px)} }
   @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
   @keyframes checkPop { 0%{transform:scale(0);opacity:0} 60%{transform:scale(1.2);opacity:1} 100%{transform:scale(1);opacity:1} }
   @keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
-  @keyframes consentNudge { 0%,100%{box-shadow:0 0 0 3px rgba(249,58,37,0.08)} 50%{box-shadow:0 0 0 6px rgba(249,58,37,0.18)} }
+  @keyframes consentNudge { 0%,100%{box-shadow:0 0 0 3px rgba(37,99,235,0.08)} 50%{box-shadow:0 0 0 6px rgba(37,99,235,0.18)} }
   @media (prefers-reduced-motion: reduce) {
     .consent-nudge { animation: none !important; }
   }
@@ -88,14 +93,14 @@ function DPLogo({ size = 36, dark = false }) {
         fontFamily: T.font.display, fontSize: `${20 * s}px`, fontWeight: 800,
         letterSpacing: "-0.02em", color: dark ? "#FFFFFF" : "#18181B", lineHeight: 1,
       }}>
-        Deals<span style={{ color: T.color.red500 }}>Pro</span>
+        Deals<span style={{ color: T.color.blue500 }}>Pro</span>
       </span>
     </div>
   );
 }
 
 function Badge({ type = "drop", children }) {
-  const s = { drop: { bg: T.color.red500, c: "#fff" }, savings: { bg: T.color.green50, c: T.color.green500 }, soldOut: { bg: T.color.n200, c: T.color.n400 } }[type] || { bg: T.color.red500, c: "#fff" };
+  const s = { drop: { bg: T.color.blue500, c: "#fff" }, savings: { bg: T.color.green50, c: T.color.green500 }, soldOut: { bg: T.color.n200, c: T.color.n400 } }[type] || { bg: T.color.blue500, c: "#fff" };
   return <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 12px", borderRadius: T.radius.full, background: s.bg, color: s.c, display: "inline-block" }}>{children}</span>;
 }
 
@@ -104,7 +109,7 @@ function Btn({ children, variant = "primary", full, disabled, onClick, style = {
   const base = { fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", cursor: disabled ? "not-allowed" : "pointer", borderRadius: T.radius.lg, transition: `all ${T.tr.base}`, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "14px 28px", width: full ? "100%" : undefined };
   const v = disabled ? { background: T.color.n200, color: T.color.n400 }
     : variant === "secondary" ? { background: "transparent", color: T.color.n900, border: `2px solid ${h ? T.color.n400 : T.color.n300}` }
-    : { background: h ? T.color.red600 : T.color.red500, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
+    : { background: h ? T.color.blue600 : T.color.blue500, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
   return <button onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)} onClick={disabled ? undefined : onClick} style={{ ...base, ...v, ...style }}>{children}</button>;
 }
 
@@ -201,17 +206,17 @@ function CaptureForm({ dark }) {
   const AMBER = "#F59E0B";
   const VALID_GREEN = "#22C55E";
   const NEUTRAL = "#D1D5DB";
-  const FOCUS_RED = "rgba(249, 58, 37, 0.4)";
-  const FOCUS_GLOW = "0 0 0 3px rgba(249, 58, 37, 0.1)";
+  const FOCUS_BLUE = "rgba(37, 99, 235, 0.5)";
+  const FOCUS_GLOW = "0 0 0 3px rgba(37, 99, 235, 0.12)";
 
   const nameBorder =
-    focus === "name" ? FOCUS_RED :
+    focus === "name" ? FOCUS_BLUE :
     showNameError ? AMBER :
     showNameOk ? VALID_GREEN :
     NEUTRAL;
 
   const phoneBorder =
-    focus === "phone" ? FOCUS_RED :
+    focus === "phone" ? FOCUS_BLUE :
     showPhoneError ? AMBER :
     showPhoneOk ? VALID_GREEN :
     NEUTRAL;
@@ -316,8 +321,8 @@ function CaptureForm({ dark }) {
         marginBottom: "20px",
         padding: "14px 16px",
         borderRadius: T.radius.lg,
-        background: optIn ? "rgba(22,163,74,0.08)" : "rgba(249,58,37,0.06)",
-        border: `1.5px solid ${optIn ? "rgba(22,163,74,0.25)" : "rgba(249,58,37,0.22)"}`,
+        background: optIn ? "rgba(22,163,74,0.08)" : "rgba(37,99,235,0.06)",
+        border: `1.5px solid ${optIn ? "rgba(22,163,74,0.25)" : "rgba(37,99,235,0.22)"}`,
         transition: "background-color 150ms ease, border-color 150ms ease",
       }}>
         <label
@@ -349,7 +354,7 @@ function CaptureForm({ dark }) {
         ) : (
           (() => {
             const { pre, between, post } = splitDisclosureForLinks();
-            const linkStyle = { color: T.color.red500, textDecoration: "underline" } as const;
+            const linkStyle = { color: T.color.blue500, textDecoration: "underline" } as const;
             return (
               <div style={{ margin: "8px 0 0", paddingLeft: "32px" }}>
                 <p style={{ fontFamily: T.font.display, fontSize: "12px", lineHeight: 1.5, color: T.color.n900, fontWeight: 500, margin: "0 0 4px" }}>
@@ -387,13 +392,13 @@ function CaptureForm({ dark }) {
         borderRadius: T.radius.lg, fontFamily: T.font.display,
         fontWeight: allValid && !loading ? 700 : 500,
         fontSize: "16px", letterSpacing: "0.03em",
-        background: allValid && !loading ? "linear-gradient(135deg, #F93A25 0%, #E0311F 100%)" : "#E5E7EB",
+        background: allValid && !loading ? "linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%)" : "#E5E7EB",
         color: allValid && !loading ? "#FFFFFF" : `rgb(${Math.max(75 - name.trim().length * 8, 24)}, ${Math.max(85 - name.trim().length * 8, 24)}, ${Math.max(99 - name.trim().length * 8, 36)})`,
         opacity: allValid && !loading ? 1 : 0.9,
         cursor: loading ? "default" : "pointer",
         transition: "all 0.2s ease",
         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
-        boxShadow: allValid && !loading ? "0 4px 16px rgba(249,58,37,0.45), 0 1px 3px rgba(0,0,0,0.1)" : "none",
+        boxShadow: allValid && !loading ? "0 4px 16px rgba(37,99,235,0.45), 0 1px 3px rgba(0,0,0,0.1)" : "none",
       }}>
         {loading ? "Setting up checkout..." : "Get drop alerts"}
         {allValid && !loading && <span style={{ fontSize: "18px" }}>→</span>}
@@ -411,13 +416,74 @@ function CaptureForm({ dark }) {
 }
 
 const Icon = {
-  phone: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.red500} strokeWidth="1.5"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>,
-  msg: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.red500} strokeWidth="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
-  qr: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.red500} strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>,
+  phone: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.blue500} strokeWidth="1.5"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>,
+  msg: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.blue500} strokeWidth="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
+  qr: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.color.blue500} strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>,
   check: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.color.green500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>,
   menu: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
   close: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
 };
+
+// ── Sample drops for the hero mockup (decorative only — shown when no live
+//    DB drops exist so the hero never renders empty and matches the premium
+//    reference. Real drops render below in <DropsSection/>). ──
+const HERO_SAMPLE_DROPS = [
+  { tag: "DROP EXCLUSIVE", title: "Family Biryani Drop", place: "Sai Gayatri · Frisco", left: "Only 12 left", price: "$39", pickup: "Fri 6–8pm" },
+  { tag: "WEEKEND ONLY", title: "BBQ Family Platter", place: "Smokey's · Prosper", left: "Only 6 left", price: "$45", pickup: "Sat 12–2pm" },
+  { tag: "LIMITED BATCH", title: "Weekend Dessert Box", place: "Sweet Lane · Frisco", left: "Only 8 left", price: "$24", pickup: "Sun 10am–12pm" },
+];
+
+function HeroMockup() {
+  return (
+    <div style={{ position: "relative", width: "100%", maxWidth: "420px", margin: "0 auto", animation: "floatSlow 6s ease-in-out infinite" }}>
+      {/* Glow behind the panel */}
+      <div style={{ position: "absolute", inset: "-12% -8% -8% -8%", background: "radial-gradient(circle at 50% 30%, rgba(37,99,235,0.28) 0%, transparent 70%)", filter: "blur(8px)", zIndex: 0 }} />
+      {/* Device panel */}
+      <div style={{
+        position: "relative", zIndex: 1,
+        background: "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%)",
+        border: "1px solid rgba(255,255,255,0.14)",
+        borderRadius: "28px", padding: "18px 16px",
+        boxShadow: "0 30px 70px rgba(0,0,0,0.5)", backdropFilter: "blur(14px)",
+      }}>
+        {/* Panel header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 4px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22C55E", boxShadow: "0 0 0 3px rgba(34,197,94,0.25)" }} />
+            <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 700, color: "#fff" }}>Drops near you</span>
+          </div>
+          <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>FRISCO, TX</span>
+        </div>
+        {/* Sample drop rows */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {HERO_SAMPLE_DROPS.map((d) => (
+            <div key={d.title} style={{
+              display: "flex", alignItems: "center", gap: "12px",
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "16px", padding: "12px 14px",
+            }}>
+              {/* Thumb */}
+              <div style={{ width: 52, height: 52, borderRadius: "12px", flexShrink: 0, background: "linear-gradient(135deg, #1D4ED8, #3B82F6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px" }}>🍽️</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: T.font.mono, fontSize: "9px", fontWeight: 800, letterSpacing: "0.08em", color: "#93C5FD", marginBottom: "3px" }}>{d.tag}</div>
+                <div style={{ fontFamily: T.font.display, fontSize: "14px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</div>
+                <div style={{ fontFamily: T.font.display, fontSize: "11px", color: "rgba(255,255,255,0.55)" }}>{d.place} · {d.pickup}</div>
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontFamily: T.font.mono, fontSize: "16px", fontWeight: 800, color: "#fff" }}>{d.price}</div>
+                <div style={{ fontFamily: T.font.display, fontSize: "10px", fontWeight: 700, color: "#FCA5A5" }}>{d.left}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Floating "reserve" pill */}
+      <div style={{ position: "absolute", zIndex: 2, right: "-8px", bottom: "44px", background: "linear-gradient(135deg, #3B82F6, #1D4ED8)", color: "#fff", fontFamily: T.font.display, fontWeight: 700, fontSize: "12px", padding: "9px 16px", borderRadius: "9999px", boxShadow: "0 10px 24px rgba(37,99,235,0.5)", animation: "float 4s ease-in-out infinite" }}>
+        Reserve · prepaid ✓
+      </div>
+    </div>
+  );
+}
 
 type HomepageProps = { initialDrops?: DropItem[] };
 
@@ -441,7 +507,7 @@ export default function App({ initialDrops }: HomepageProps = {}) {
 
   useEffect(() => { const fn = () => setScrolled(window.scrollY > 60); window.addEventListener("scroll", fn, { passive: true }); return () => window.removeEventListener("scroll", fn); }, []);
 
-  const SH = ({ label, title, dark, center = true }) => { const [r, v] = useInView(); return (<div ref={r} style={{ textAlign: center ? "center" : "left", marginBottom: "48px", opacity: v ? 1 : 0, animation: v ? "fadeUp 0.5s ease both" : "none" }}><div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: T.color.red500, marginBottom: "12px" }}>{label}</div><h2 style={{ fontFamily: T.font.display, fontSize: "clamp(24px, 4vw, 36px)", fontWeight: 700, lineHeight: 1.2, letterSpacing: "-0.02em", color: dark ? "#fff" : T.color.n900 }}>{title}</h2></div>); };
+  const SH = ({ label, title, dark, center = true }) => { const [r, v] = useInView(); return (<div ref={r} style={{ textAlign: center ? "center" : "left", marginBottom: "48px", opacity: v ? 1 : 0, animation: v ? "fadeUp 0.5s ease both" : "none" }}><div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: T.color.blue500, marginBottom: "12px" }}>{label}</div><h2 style={{ fontFamily: T.font.display, fontSize: "clamp(24px, 4vw, 36px)", fontWeight: 700, lineHeight: 1.2, letterSpacing: "-0.02em", color: dark ? "#fff" : T.color.n900 }}>{title}</h2></div>); };
 
   return (
     <div style={{ fontFamily: T.font.display, color: T.color.n900, background: T.color.n0, overflowX: "hidden" }}>
@@ -453,27 +519,41 @@ export default function App({ initialDrops }: HomepageProps = {}) {
         <div style={{ maxWidth: "1120px", margin: "0 auto", height: "64px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <DPLogo size={scrolled ? 34 : 38} dark={!scrolled} />
           <div style={{ display: "flex", alignItems: "center", gap: "28px" }}>
-            <div className="dk" style={{ display: "flex", gap: "28px" }}>{["How It Works", "For Restaurants", "For Creators"].map(l => <a key={l} href={`#${l.toLowerCase().replace(/\s+/g,"-")}`} style={{ fontFamily: T.font.display, fontSize: "14px", fontWeight: 500, color: scrolled ? T.color.n500 : "rgba(255,255,255,0.7)", textDecoration: "none" }}>{l}</a>)}</div>
-            <a href="#get-deals" className="dk" style={{ textDecoration: "none" }}><Btn style={{ padding: "10px 20px", fontSize: "13px" }}>Get Deals</Btn></a>
+            <div className="dk" style={{ display: "flex", gap: "28px" }}>{["How It Works", "For Restaurants"].map(l => <a key={l} href={`#${l.toLowerCase().replace(/\s+/g,"-")}`} style={{ fontFamily: T.font.display, fontSize: "14px", fontWeight: 500, color: scrolled ? T.color.n500 : "rgba(255,255,255,0.7)", textDecoration: "none" }}>{l}</a>)}</div>
+            <a href="#get-deals" className="dk" style={{ textDecoration: "none" }}><Btn style={{ padding: "10px 20px", fontSize: "13px" }}>Get drop alerts</Btn></a>
             <button className="mb" onClick={() => setMobileNav(true)} style={{ background: "none", border: "none", cursor: "pointer", color: scrolled ? T.color.n900 : "#fff", display: "none" }}>{Icon.menu}</button>
           </div>
         </div>
       </nav>
-      {mobileNav && <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.5)" }} onClick={() => setMobileNav(false)}><div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: "280px", background: T.color.n0, padding: "24px" }} onClick={e => e.stopPropagation()}><button onClick={() => setMobileNav(false)} style={{ background: "none", border: "none", cursor: "pointer", position: "absolute", top: "20px", right: "20px", color: T.color.n900 }}>{Icon.close}</button><div style={{ display: "flex", flexDirection: "column", gap: "24px", marginTop: "48px" }}>{["How It Works", "For Restaurants", "For Creators"].map(l => <a key={l} href={`#${l.toLowerCase().replace(/\s+/g,"-")}`} onClick={() => setMobileNav(false)} style={{ fontFamily: T.font.display, fontSize: "18px", fontWeight: 600, color: T.color.n900, textDecoration: "none" }}>{l}</a>)}<a href="#get-deals" onClick={() => setMobileNav(false)} style={{ textDecoration: "none" }}><Btn full>Get Deals</Btn></a></div></div></div>}
+      {mobileNav && <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.5)" }} onClick={() => setMobileNav(false)}><div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: "280px", background: T.color.n0, padding: "24px" }} onClick={e => e.stopPropagation()}><button onClick={() => setMobileNav(false)} style={{ background: "none", border: "none", cursor: "pointer", position: "absolute", top: "20px", right: "20px", color: T.color.n900 }}>{Icon.close}</button><div style={{ display: "flex", flexDirection: "column", gap: "24px", marginTop: "48px" }}>{["How It Works", "For Restaurants"].map(l => <a key={l} href={`#${l.toLowerCase().replace(/\s+/g,"-")}`} onClick={() => setMobileNav(false)} style={{ fontFamily: T.font.display, fontSize: "18px", fontWeight: 600, color: T.color.n900, textDecoration: "none" }}>{l}</a>)}<a href="#get-deals" onClick={() => setMobileNav(false)} style={{ textDecoration: "none" }}><Btn full>Get drop alerts</Btn></a></div></div></div>}
 
       {/* HERO */}
       <section style={{ background: `linear-gradient(170deg, ${T.color.n950} 0%, #0D0D10 60%, ${T.color.n800} 100%)`, padding: "80px 20px 40px", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, opacity: 0.03, backgroundImage: `radial-gradient(${T.color.n400} 1px, transparent 1px)`, backgroundSize: "24px 24px" }}/>
-        <div style={{ position: "absolute", top: "-20%", right: "-10%", width: "500px", height: "500px", background: "radial-gradient(circle, rgba(249,58,37,0.08) 0%, transparent 70%)", borderRadius: "50%" }}/>
-        <div className="hg" style={{ maxWidth: "1120px", margin: "0 auto", position: "relative", display: "grid", gridTemplateColumns: showHeroCard ? "1fr 1fr" : "1fr", gap: "60px", alignItems: "center" }}>
+        <div style={{ position: "absolute", top: "-20%", right: "-10%", width: "500px", height: "500px", background: "radial-gradient(circle, rgba(37,99,235,0.14) 0%, transparent 70%)", borderRadius: "50%" }}/>
+        <div className="hg" style={{ maxWidth: "1120px", margin: "0 auto", position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "60px", alignItems: "center" }}>
           <div style={{ animation: "fadeUp 0.6s ease both" }}>
-            <h1 style={{ fontFamily: T.font.display, fontSize: "clamp(28px, 5vw, 44px)", fontWeight: 800, lineHeight: 1.15, letterSpacing: "-0.03em", color: "#fff", marginBottom: "20px" }}>Exclusive Restaurant Deals. <span style={{ color: T.color.red500 }}>Limited Drops.</span> Sent to Your Phone.</h1>
-            <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Restaurant deals you can't find anywhere else. Dropped weekly. Claim before they sell out.</p>
+            {/* Locality + live-count badge */}
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "7px 14px", borderRadius: T.radius.full, background: "rgba(37,99,235,0.14)", border: "1px solid rgba(37,99,235,0.3)", marginBottom: "22px" }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22C55E", animation: "pulseDot 1.6s ease-in-out infinite" }} />
+              <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: "#DBEAFE", letterSpacing: "0.01em" }}>
+                This week in Frisco · {drops.length > 0 ? `${drops.length} drop${drops.length === 1 ? "" : "s"} live` : "new drops soon"}
+              </span>
+            </div>
+            <h1 style={{ fontFamily: T.font.display, fontSize: "clamp(30px, 5vw, 48px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: "#fff", marginBottom: "20px" }}>
+              Premium restaurant drops.<br />Limited. Prepaid.{" "}
+              <span style={{ background: "linear-gradient(120deg, #60A5FA 0%, #2563EB 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent", color: "#2563EB" }}>Gone fast.</span>
+            </h1>
+            <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "32px", maxWidth: "480px" }}>Curated local food drops, released weekly. Reserve your spot before they sell out — no app needed.</p>
             <CaptureForm dark />
           </div>
-          {showHeroCard && featuredDrop && (
-            <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}><div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "440px", width: "100%", margin: "0 auto" }}><DropCard item={featuredDrop} spotsRemaining={featuredSpots} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} isAboveFold featured /></div></div>
-          )}
+          <div style={{ display: "flex", justifyContent: "center", animation: "fadeUp 0.6s ease 0.2s both" }}>
+            {showHeroCard && featuredDrop ? (
+              <div style={{ animation: "float 4s ease-in-out infinite", maxWidth: "440px", width: "100%", margin: "0 auto" }}><DropCard item={featuredDrop} spotsRemaining={featuredSpots} distance={getDistance(featuredDrop.lat, featuredDrop.lng)} isAboveFold featured /></div>
+            ) : (
+              <HeroMockup />
+            )}
+          </div>
         </div>
       </section>
 
@@ -495,19 +575,16 @@ export default function App({ initialDrops }: HomepageProps = {}) {
       <DropsSection drops={drops} onData={setDropsData} />
 
       {/* HOW IT WORKS */}
-      <section id="how-it-works" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="How It Works" title="Three Steps to Exclusive Deals" /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "24px" }}>{[{ icon: Icon.phone, t: "Enter Your Name & Phone", d: "Sign up in 10 seconds. No app to download, no account to create." },{ icon: Icon.msg, t: "Get Weekly Deals", d: "Exclusive limited-time deals from local restaurants, delivered via text every week." },{ icon: Icon.qr, t: "Pay & Redeem", d: "Prepay online at the deal price. Show your QR code at the restaurant." }].map((s, i) => { const [r, v] = useInView(); return (<div key={i} ref={r} style={{ textAlign: "center", padding: "32px 24px", borderRadius: T.radius.xl, border: `1px solid ${T.color.n200}`, opacity: v ? 1 : 0, animation: v ? `fadeUp 0.5s ease ${i * 120}ms both` : "none" }}><div style={{ width: "60px", height: "60px", borderRadius: T.radius.xl, background: T.color.red50, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>{s.icon}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.red500, letterSpacing: "0.1em", marginBottom: "8px" }}>STEP {i + 1}</div><h3 style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "8px" }}>{s.t}</h3><p style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.6, color: T.color.n500 }}>{s.d}</p></div>); })}</div></div></section>
+      <section id="how-it-works" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="How It Works" title="Three steps. No app to download." /><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "24px" }}>{[{ icon: Icon.msg, t: "Get alerted", d: "Text alert when new drops go live in your area." },{ icon: Icon.phone, t: "Reserve fast", d: "Prepay to lock in your order before it sells out." },{ icon: Icon.qr, t: "Pick it up", d: "Show your QR code at the restaurant and enjoy." }].map((s, i) => { const [r, v] = useInView(); return (<div key={i} ref={r} style={{ textAlign: "center", padding: "32px 24px", borderRadius: T.radius.xl, border: `1px solid ${T.color.n200}`, opacity: v ? 1 : 0, animation: v ? `fadeUp 0.5s ease ${i * 120}ms both` : "none" }}><div style={{ width: "60px", height: "60px", borderRadius: T.radius.xl, background: T.color.blue50, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>{s.icon}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.blue500, letterSpacing: "0.1em", marginBottom: "8px" }}>STEP {i + 1}</div><h3 style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "8px" }}>{s.t}</h3><p style={{ fontFamily: T.font.display, fontSize: "14px", lineHeight: 1.6, color: T.color.n500 }}>{s.d}</p></div>); })}</div></div></section>
 
       {/* FOR RESTAURANTS */}
-      <section id="for-restaurants" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="For Restaurants" title="Fill Empty Tables Without Discounting Your Brand" />{(() => { const [r, v] = useInView(); return (<div ref={r} className="rg" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px", alignItems: "center", opacity: v ? 1 : 0, animation: v ? "fadeUp 0.5s ease both" : "none" }}><div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>{["Limited to 20 deals per week — no Groupon floods", "Customers prepay — guaranteed revenue before they walk in", "Accept or decline each deal via text — full control", "No POS changes. No hardware. No setup fee."].map((p, i) => (<div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}><div style={{ width: "26px", height: "26px", borderRadius: "50%", background: T.color.green50, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "2px" }}>{Icon.check}</div><span style={{ fontFamily: T.font.display, fontSize: "15px", lineHeight: 1.5, color: T.color.n900, fontWeight: 500 }}>{p}</span></div>))}<div style={{ marginTop: "8px" }}><a href="mailto:sales@dealspro.ai?subject=Restaurant%20Partnership%20Inquiry" style={{ textDecoration: "none" }}><Btn>Partner With Us →</Btn></a></div></div><div style={{ background: T.color.n50, borderRadius: T.radius.xxl, padding: "28px 20px", border: `1px solid ${T.color.n200}` }}><div style={{ fontFamily: T.font.mono, fontSize: "10px", fontWeight: 700, color: T.color.n400, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "16px", textAlign: "center" }}>SMS CONFIRMATION FLOW</div>{[{ from: "sys", text: "🔔 New DealsPro order!\n\nCustomer: Sarah M.\nDeal: $50 for $25\n\nReply ACCEPT or DECLINE" },{ from: "rest", text: "ACCEPT" },{ from: "sys", text: "✅ Confirmed! Sarah has been notified and will receive her QR code." }].map((m, i) => (<div key={i} style={{ display: "flex", justifyContent: m.from === "rest" ? "flex-end" : "flex-start", marginBottom: "10px" }}><div style={{ maxWidth: "85%", padding: "10px 14px", borderRadius: "14px", background: m.from === "rest" ? T.color.red500 : T.color.n0, color: m.from === "rest" ? "#fff" : T.color.n900, fontFamily: T.font.display, fontSize: "12px", lineHeight: 1.5, whiteSpace: "pre-line", boxShadow: T.shadow.sm, border: m.from === "sys" ? `1px solid ${T.color.n200}` : "none" }}>{m.text}</div></div>))}</div></div>); })()}</div></section>
-
-      {/* FOR CREATORS */}
-      <section id="for-creators" style={{ padding: "80px 20px", background: T.color.n950 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="For Creators" title="Turn Your Followers Into Revenue" dark />{(() => { const [r, v] = useInView(); return (<div ref={r} className="rg" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px", alignItems: "center", opacity: v ? 1 : 0, animation: v ? "fadeUp 0.5s ease both" : "none" }}><div><p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.7, color: T.color.n400, marginBottom: "28px" }}>Get your own DealsPro page. Share exclusive deals with your audience. Earn commission on every sale — no inventory, no shipping, no hassle.</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "28px" }}>{["Avg $500/mo per creator", "10% commission", "Your own branded page"].map(s => <span key={s} style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: T.color.red500, background: "rgba(249,58,37,0.1)", padding: "8px 14px", borderRadius: T.radius.full }}>{s}</span>)}</div><a href="mailto:sales@dealspro.ai?subject=Creator%20Program%20Application" style={{ textDecoration: "none" }}><Btn>Become a Creator →</Btn></a></div><div style={{ background: T.color.n800, borderRadius: T.radius.xxl, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}><div style={{ padding: "10px 16px", background: T.color.n950, display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}><div style={{ display: "flex", gap: "5px" }}><div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#FF5F57" }}/><div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#FFBD2E" }}/><div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#28CA41" }}/></div><div style={{ flex: 1, background: "rgba(255,255,255,0.06)", borderRadius: T.radius.full, padding: "5px 12px", fontFamily: T.font.mono, fontSize: "11px", color: T.color.n400, textAlign: "center" }}>dealspro.ai/daborhood</div></div><div style={{ padding: "24px", textAlign: "center" }}><div style={{ width: "52px", height: "52px", borderRadius: "50%", background: `linear-gradient(135deg, ${T.color.red500}, ${T.color.amber500})`, margin: "0 auto 10px", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: T.font.display, fontSize: "20px", fontWeight: 800, color: "#fff" }}>D</div><div style={{ fontFamily: T.font.display, fontSize: "16px", fontWeight: 700, color: "#fff" }}>@daborhood</div><div style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, marginTop: "4px", marginBottom: "16px" }}>DFW's best food finds · 12.4K followers</div>{[{ n: "Sakura Ramen", p: "$25", w: "$50" }, { n: "Tandoori Nights", p: "$20", w: "$40" }].map((d, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderRadius: T.radius.lg, background: "rgba(255,255,255,0.04)", marginBottom: "8px", border: "1px solid rgba(255,255,255,0.06)" }}><div style={{ textAlign: "left" }}><div style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: "#fff" }}>{d.n}</div><div style={{ fontFamily: T.font.mono, fontSize: "11px", color: T.color.n400 }}><span style={{ color: T.color.red500, fontWeight: 700 }}>{d.p}</span> <span style={{ textDecoration: "line-through" }}>{d.w}</span></div></div><Badge>DROP</Badge></div>))}</div></div></div>); })()}</div></section>
+      <section id="for-restaurants" style={{ padding: "80px 20px", background: T.color.n0 }}><div style={{ maxWidth: "1120px", margin: "0 auto" }}><SH label="For Restaurants" title="Turn one strong menu item into a prepaid local drop." /><p style={{ fontFamily: T.font.display, fontSize: "16px", lineHeight: 1.65, color: T.color.n500, textAlign: "center", maxWidth: "640px", margin: "-32px auto 48px" }}>DealsPro helps restaurants launch limited pickup drops, collect prepaid orders, and measure demand — without POS integration.</p>{(() => { const [r, v] = useInView(); return (<div ref={r} className="rg" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px", alignItems: "center", opacity: v ? 1 : 0, animation: v ? "fadeUp 0.5s ease both" : "none" }}><div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>{["Prepaid pickup orders", "Limited quantity", "Source attribution", "No POS integration required", "Run successful drops again"].map((p, i) => (<div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}><div style={{ width: "26px", height: "26px", borderRadius: "50%", background: T.color.blue50, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "2px" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.color.blue500} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg></div><span style={{ fontFamily: T.font.display, fontSize: "15px", lineHeight: 1.5, color: T.color.n900, fontWeight: 500 }}>{p}</span></div>))}<div style={{ marginTop: "8px" }}><a href="mailto:sales@dealspro.ai?subject=Partner%20with%20DealsPro" style={{ textDecoration: "none" }}><Btn>Partner with DealsPro →</Btn></a></div></div><div style={{ background: T.color.n50, borderRadius: T.radius.xxl, padding: "28px 20px", border: `1px solid ${T.color.n200}` }}><div style={{ fontFamily: T.font.mono, fontSize: "10px", fontWeight: 700, color: T.color.n400, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "16px", textAlign: "center" }}>DROP CONFIRMATION FLOW</div>{[{ from: "sys", text: "🔔 New prepaid drop order!\n\nCustomer: Sarah M.\nDrop: Family Biryani Drop · $39\nPickup: Fri 6–8pm\n\nReply ACCEPT or DECLINE" },{ from: "rest", text: "ACCEPT" },{ from: "sys", text: "✅ Confirmed! Sarah has her QR code and pickup time." }].map((m, i) => (<div key={i} style={{ display: "flex", justifyContent: m.from === "rest" ? "flex-end" : "flex-start", marginBottom: "10px" }}><div style={{ maxWidth: "85%", padding: "10px 14px", borderRadius: "14px", background: m.from === "rest" ? T.color.blue500 : T.color.n0, color: m.from === "rest" ? "#fff" : T.color.n900, fontFamily: T.font.display, fontSize: "12px", lineHeight: 1.5, whiteSpace: "pre-line", boxShadow: T.shadow.sm, border: m.from === "sys" ? `1px solid ${T.color.n200}` : "none" }}>{m.text}</div></div>))}</div></div>); })()}</div></section>
 
       {/* FINAL CTA */}
-      <section id="get-deals" style={{ background: `linear-gradient(135deg, ${T.color.red500} 0%, ${T.color.n950} 100%)`, padding: "80px 20px", textAlign: "center" }}><div style={{ maxWidth: "520px", margin: "0 auto" }}><h2 style={{ fontFamily: T.font.display, fontSize: "clamp(26px, 4vw, 36px)", fontWeight: 800, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.02em", marginBottom: "12px" }}>Don't Miss the Next Drop</h2><p style={{ fontFamily: T.font.display, fontSize: "16px", color: "rgba(255,255,255,0.7)", marginBottom: "32px", lineHeight: 1.5 }}>Exclusive limited-time restaurant deals drop every week. Limited spots. Be the first to know.</p><div style={{ display: "flex", justifyContent: "center" }}><CaptureForm dark /></div><div style={{ fontFamily: T.font.display, fontSize: "13px", color: "rgba(255,255,255,0.5)", marginTop: "24px" }}>Join 500+ DFW foodies already saving</div></div></section>
+      <section id="get-deals" style={{ background: `linear-gradient(135deg, ${T.color.blue600} 0%, ${T.color.n950} 100%)`, padding: "80px 20px", textAlign: "center" }}><div style={{ maxWidth: "520px", margin: "0 auto" }}><h2 style={{ fontFamily: T.font.display, fontSize: "clamp(26px, 4vw, 36px)", fontWeight: 800, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.02em", marginBottom: "12px" }}>Don't miss the next drop</h2><p style={{ fontFamily: T.font.display, fontSize: "16px", color: "rgba(255,255,255,0.75)", marginBottom: "32px", lineHeight: 1.5 }}>New restaurant drops go live every week. Limited quantity. Reserve before they're gone.</p><div style={{ display: "flex", justifyContent: "center" }}><CaptureForm dark /></div><div style={{ fontFamily: T.font.display, fontSize: "13px", color: "rgba(255,255,255,0.6)", marginTop: "24px" }}>Join 500+ Frisco foodies getting drop alerts</div></div></section>
 
       {/* FOOTER */}
-      <footer style={{ background: T.color.n950, padding: "48px 20px 32px", borderTop: `1px solid ${T.color.n800}` }}><div className="fg" style={{ maxWidth: "1120px", margin: "0 auto", display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "40px" }}><div><div style={{ marginBottom: "12px" }}><DPLogo size={32} dark /></div><p style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, lineHeight: 1.6, maxWidth: "260px" }}>Exclusive restaurant deals, limited weekly drops, delivered to your phone.</p></div>{[{ t: "Platform", l: [{n:"How It Works",h:"#how-it-works"},{n:"Featured Deals",h:"#deals"},{n:"For Restaurants",h:"#for-restaurants"},{n:"For Creators",h:"#for-creators"}] },{ t: "Company", l: [{n:"About",h:"#how-it-works"},{n:"Contact",h:"mailto:sales@dealspro.ai"},] },{ t: "Legal", l: [{n:"Terms of Service",h:"/terms"},{n:"Privacy Policy",h:"/privacy"},{n:"Opt-In Policy",h:"/opt-in"},{n:"Opt-Out Policy",h:"/opt-out"},{n:"Cookies",h:"/cookies"}] }].map(c => (<div key={c.t}><div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, color: T.color.n400, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "14px" }}>{c.t}</div>{c.l.map(l => <a key={l.n} href={l.h} style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, textDecoration: "none", marginBottom: "8px" }}>{l.n}</a>)}</div>))}</div><div style={{ maxWidth: "1120px", margin: "36px auto 0", paddingTop: "20px", borderTop: `1px solid ${T.color.n800}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}><span style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400 }}>© 2026 DealsPro. All rights reserved.</span><div style={{ display: "flex", gap: "16px" }}>{["Twitter", "Instagram", "TikTok"].map(s => <a key={s} href="#" style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, textDecoration: "none" }}>{s}</a>)}</div></div></footer>
+      <footer style={{ background: T.color.n950, padding: "48px 20px 32px", borderTop: `1px solid ${T.color.n800}` }}><div className="fg" style={{ maxWidth: "1120px", margin: "0 auto", display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "40px" }}><div><div style={{ marginBottom: "12px" }}><DPLogo size={32} dark /></div><p style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, lineHeight: 1.6, maxWidth: "260px" }}>Limited restaurant drops near you — prepaid, reserved, picked up. Released weekly.</p></div>{[{ t: "Platform", l: [{n:"How It Works",h:"#how-it-works"},{n:"Live Drops",h:"#deals"},{n:"For Restaurants",h:"#for-restaurants"}] },{ t: "Company", l: [{n:"About",h:"#how-it-works"},{n:"Contact",h:"mailto:sales@dealspro.ai"},] },{ t: "Legal", l: [{n:"Terms of Service",h:"/terms"},{n:"Privacy Policy",h:"/privacy"},{n:"Opt-In Policy",h:"/opt-in"},{n:"Opt-Out Policy",h:"/opt-out"},{n:"Cookies",h:"/cookies"}] }].map(c => (<div key={c.t}><div style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 600, color: T.color.n400, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "14px" }}>{c.t}</div>{c.l.map(l => <a key={l.n} href={l.h} style={{ display: "block", fontFamily: T.font.display, fontSize: "13px", color: T.color.n400, textDecoration: "none", marginBottom: "8px" }}>{l.n}</a>)}</div>))}</div><div style={{ maxWidth: "1120px", margin: "36px auto 0", paddingTop: "20px", borderTop: `1px solid ${T.color.n800}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}><span style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400 }}>© 2026 DealsPro. All rights reserved.</span><div style={{ display: "flex", gap: "16px" }}>{["Twitter", "Instagram", "TikTok"].map(s => <a key={s} href="#" style={{ fontFamily: T.font.display, fontSize: "12px", color: T.color.n400, textDecoration: "none" }}>{s}</a>)}</div></div></footer>
     </div>
   );
 }
