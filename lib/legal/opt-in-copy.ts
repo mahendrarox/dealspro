@@ -11,7 +11,7 @@
 export const DEALSPRO_OPT_IN_TITLE = "Get DealsPro Drop Alerts";
 
 export const DEALSPRO_OPT_IN_SUBTITLE =
-  "Local deals and limited drops. No app needed.";
+  "Join the local drop list. We'll text you the moment new drops go live — no app needed.";
 
 /** Short label rendered next to the checkbox. */
 export const DEALSPRO_SMS_OPT_IN_SHORT_TEXT =

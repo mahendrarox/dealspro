@@ -256,26 +256,40 @@ function SampleDropCard({ d, delay }: { d: typeof SAMPLE_DROPS[number]; delay: n
           <div style={{ position: "absolute", top: 12, left: 12 }}>
             <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", padding: "5px 12px", borderRadius: T.radius.full, background: "rgba(255,255,255,0.92)", color: T.color.fire700, display: "inline-block" }}>{d.tag}</span>
           </div>
+          {/* Urgency — dominant solid fire pill with a live pulse dot */}
           <div style={{ position: "absolute", top: 12, right: 12 }}>
-            <span style={{ fontFamily: T.font.display, fontSize: "12px", fontWeight: 800, padding: "5px 12px", borderRadius: T.radius.full, background: T.color.fire50, color: T.color.fire600, border: `1px solid ${T.color.fire100}`, display: "inline-block" }}>{d.left}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.01em", padding: "6px 12px", borderRadius: T.radius.full, background: T.color.fire500, color: "#fff", boxShadow: "0 6px 16px rgba(249,58,37,0.42)" }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff", animation: "pulseDot 1.5s ease-in-out infinite" }} />
+              {d.left}
+            </span>
           </div>
         </div>
         {/* Content */}
         <div style={{ padding: "16px 18px 18px", display: "flex", flexDirection: "column", flex: 1 }}>
-          <div style={{ fontFamily: T.font.display, fontSize: "19px", fontWeight: 700, color: T.color.n900, lineHeight: 1.25 }}>{d.title}</div>
+          <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 800, color: T.color.n900, lineHeight: 1.2, letterSpacing: "-0.01em" }}>{d.title}</div>
           <div style={{ fontFamily: T.font.display, fontSize: "13px", color: T.color.n500, marginTop: "4px" }}>{d.place}</div>
-          <div style={{ fontFamily: T.font.mono, fontSize: "12px", color: T.color.n400, marginTop: "8px" }}>⏰ {d.pickup}</div>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: "14px" }}>
-            <span style={{ fontFamily: T.font.mono, fontSize: "28px", fontWeight: 800, color: T.color.n900, lineHeight: 1 }}>{d.price}</span>
-            <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: T.color.n500 }}>{d.detail}</span>
+          {/* Pickup chip — scannable */}
+          <div style={{ display: "inline-flex", alignSelf: "flex-start", alignItems: "center", gap: "6px", marginTop: "12px", padding: "6px 11px", borderRadius: T.radius.full, background: T.color.fire50, border: `1px solid ${T.color.fire100}` }}>
+            <span style={{ fontSize: "12px", lineHeight: 1 }}>⏰</span>
+            <span style={{ fontFamily: T.font.display, fontSize: "12.5px", fontWeight: 700, color: T.color.fire700 }}>{d.pickup}</span>
           </div>
-          <div style={{ marginTop: "16px", marginBottom: 0, flex: 0 }}>
+          {/* Price + detail */}
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: "16px" }}>
+            <div>
+              <div style={{ fontFamily: T.font.mono, fontSize: "32px", fontWeight: 800, color: T.color.n900, lineHeight: 1 }}>{d.price}</div>
+              <div style={{ fontFamily: T.font.display, fontSize: "11.5px", fontWeight: 600, color: T.color.n400, marginTop: "5px", letterSpacing: "0.02em" }}>prepaid · pickup</div>
+            </div>
+            <span style={{ fontFamily: T.font.display, fontSize: "12.5px", fontWeight: 700, color: T.color.n500, background: T.color.n50, border: `1px solid ${T.color.n200}`, padding: "6px 11px", borderRadius: T.radius.full }}>{d.detail}</span>
+          </div>
+          {/* Reserve — dominant black CTA */}
+          <div style={{ marginTop: "18px" }}>
             <button style={{
-              width: "100%", fontFamily: T.font.display, fontWeight: 700, fontSize: "15px", letterSpacing: "0.02em",
-              border: "none", borderRadius: T.radius.lg, padding: "14px 20px",
+              width: "100%", fontFamily: T.font.display, fontWeight: 800, fontSize: "15px", letterSpacing: "0.02em",
+              border: "none", borderRadius: T.radius.lg, padding: "15px 20px",
               background: h ? "#000000" : T.color.ink, color: "#fff", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
               boxShadow: h ? T.shadow.md : T.shadow.sm, transition: `all ${T.tr.base}`,
-            }}>Reserve</button>
+            }}>Reserve <span style={{ fontSize: "17px" }}>→</span></button>
           </div>
         </div>
       </div>
@@ -286,7 +300,7 @@ function SampleDropCard({ d, delay }: { d: typeof SAMPLE_DROPS[number]; delay: n
 function SampleDrops() {
   return (
     <section id="deals" style={{ padding: "80px 20px", background: T.color.n50 }}>
-      <style>{`@media(max-width:900px){.drops-grid{grid-template-columns:1fr 1fr!important}}@media(max-width:600px){.drops-grid{grid-template-columns:1fr!important;max-width:400px;margin:0 auto}}`}</style>
+      <style>{`@keyframes pulseDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.8)}}@media(max-width:900px){.drops-grid{grid-template-columns:1fr 1fr!important}}@media(max-width:600px){.drops-grid{grid-template-columns:1fr!important;max-width:400px;margin:0 auto}}`}</style>
       <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
         <SectionHeader label="Live drops" title="Live drops near you" />
         <div className="drops-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "24px", alignItems: "stretch" }}>
