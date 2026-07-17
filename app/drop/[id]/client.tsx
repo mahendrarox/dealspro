@@ -5,7 +5,6 @@ import type { DropItem } from "@/lib/drops/types";
 import {
   formatTimeWindow,
   formatDate,
-  getDiscountPct,
   canPurchase,
   isPickupInProgress,
   hasEnded,
@@ -15,13 +14,13 @@ import {
 const T = {
   page: "#0A0A0A",
   card: "#FFFFFF",
-  dark: "#1F2937",
+  dark: "#18181B",
+  ink: "#161616",
   red: "#F93A25",
   redShadow: "0 4px 14px rgba(249, 58, 37, 0.35)",
   text: "#111827",
   textMuted: "#6B7280",
   textDim: "#9CA3AF",
-  greenBg: "#ECFDF5",
   greenFg: "#059669",
   divider: "#E5E7EB",
   display: "'DM Sans', -apple-system, 'Segoe UI', sans-serif",
@@ -93,8 +92,6 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
   const pickupActive = isPickupInProgress(item);
   const cancelled = item.status === "cancelled";
   const disabled = !canPurchase(item) || sold || ended || pickupActive || cancelled;
-  const pct = getDiscountPct(item);
-  const hasDiscount = item.original_price > item.price;
   const hasImage = !!item.image_url;
 
   const spotsTotal = item.total_spots;
@@ -225,7 +222,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
             aspectRatio: "3 / 2",
             maxHeight: "320px",
             overflow: "hidden",
-            background: "linear-gradient(135deg, #1f2937, #374151)",
+            background: "linear-gradient(135deg, #1c1c1e, #2b2b2f)",
           }}
         >
           {hasImage && (
@@ -270,34 +267,29 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
 
         {/* ── White content: price + scarcity ── */}
         <div style={{ padding: "22px", display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* ── 2. PRICE + SAVINGS ── */}
+          {/* ── 2. PRICE — single prepaid price, no discount framing ── */}
           <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "10px" }}>
             <span style={{ fontFamily: T.mono, fontSize: "38px", fontWeight: 800, color: T.text, letterSpacing: "-0.02em", lineHeight: 1 }}>
               ${item.price.toFixed(2)}
             </span>
-            {hasDiscount && (
-              <>
-                <span style={{ fontFamily: T.mono, fontSize: "18px", fontWeight: 500, color: T.textDim, textDecoration: "line-through" }}>
-                  ${item.original_price.toFixed(2)}
-                </span>
-                <span style={{
-                  fontSize: "13px", fontWeight: 800, color: T.greenFg, background: T.greenBg,
-                  padding: "4px 10px", borderRadius: "6px", letterSpacing: "0.02em",
-                }}>
-                  {pct}% OFF
-                </span>
-              </>
-            )}
+            <span style={{ fontFamily: T.display, fontSize: "14px", fontWeight: 600, color: T.textMuted, letterSpacing: "0.01em" }}>
+              prepaid · pickup
+            </span>
           </div>
 
-          {/* ── 3. SCARCITY BAR ── */}
+          {/* ── 3. SCARCITY BAR — primary urgency driver ── */}
           <div>
-            <div style={{
-              fontSize: "14px", fontWeight: 800,
-              color: sold ? T.red : urgent ? T.red : T.textMuted,
-              marginBottom: "7px",
-            }}>
-              {scarcityText}
+            <div style={{ marginBottom: "9px" }}>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "6px",
+                fontFamily: T.display, fontSize: "14px", fontWeight: 800, letterSpacing: "0.01em",
+                padding: "6px 13px", borderRadius: "9999px",
+                background: sold ? "#F3F4F6" : "rgba(249,58,37,0.10)",
+                color: sold ? T.textMuted : T.red,
+                border: `1px solid ${sold ? T.divider : "rgba(249,58,37,0.28)"}`,
+              }}>
+                {scarcityText}
+              </span>
             </div>
             <div style={{ width: "100%", height: 8, borderRadius: "9999px", background: T.divider, overflow: "hidden" }}>
               <div style={{
@@ -463,12 +455,12 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           disabled={ctaDisabled || loading}
           style={{
             width: "100%", minHeight: 54, border: "none", borderRadius: "14px",
-            background: ctaDisabled ? "#E5E7EB" : T.red,
+            background: ctaDisabled ? "#E5E7EB" : T.ink,
             color: ctaDisabled ? T.textDim : "#fff",
             fontFamily: T.display, fontWeight: 800, fontSize: "17px",
             cursor: ctaDisabled || loading ? "default" : "pointer",
             transition: "all 150ms ease",
-            boxShadow: ctaDisabled ? "none" : "0 4px 20px rgba(249,58,37,0.4)",
+            boxShadow: ctaDisabled ? "none" : "0 8px 24px rgba(0,0,0,0.32)",
           }}
         >
           {ctaText}
