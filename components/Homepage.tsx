@@ -115,7 +115,7 @@ function Btn({ children, variant = "primary", full, disabled, onClick, style = {
   const base = { fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", cursor: disabled ? "not-allowed" : "pointer", borderRadius: T.radius.lg, transition: `all ${T.tr.base}`, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "14px 28px", width: full ? "100%" : undefined };
   const v = disabled ? { background: T.color.n200, color: T.color.n400 }
     : variant === "secondary" ? { background: "transparent", color: T.color.n900, border: `2px solid ${h ? T.color.n400 : T.color.n300}` }
-    : { background: h ? "#000000" : T.color.ink, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
+    : { background: h ? T.color.fire600 : T.color.fire500, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
   return <button onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)} onClick={disabled ? undefined : onClick} style={{ ...base, ...v, ...style }}>{children}</button>;
 }
 
@@ -398,13 +398,13 @@ function CaptureForm({ dark }) {
         borderRadius: T.radius.lg, fontFamily: T.font.display,
         fontWeight: allValid && !loading ? 700 : 500,
         fontSize: "16px", letterSpacing: "0.03em",
-        background: allValid && !loading ? T.color.ink : "#E5E7EB",
+        background: allValid && !loading ? T.color.fire500 : "#E5E7EB",
         color: allValid && !loading ? "#FFFFFF" : `rgb(${Math.max(75 - name.trim().length * 8, 24)}, ${Math.max(85 - name.trim().length * 8, 24)}, ${Math.max(99 - name.trim().length * 8, 36)})`,
         opacity: allValid && !loading ? 1 : 0.9,
         cursor: loading ? "default" : "pointer",
         transition: "all 0.2s ease",
         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
-        boxShadow: allValid && !loading ? "0 6px 18px rgba(0,0,0,0.28), 0 1px 3px rgba(0,0,0,0.12)" : "none",
+        boxShadow: allValid && !loading ? "0 6px 18px rgba(249,58,37,0.4), 0 1px 3px rgba(0,0,0,0.12)" : "none",
       }}>
         {loading ? "Setting up checkout..." : "Get drop alerts"}
         {allValid && !loading && <span style={{ fontSize: "18px" }}>→</span>}

@@ -22,14 +22,13 @@ import {
 
 const T = {
   color: {
-    // DealsPro fire accent (red/orange). CTA buttons are black (ink).
+    // DealsPro fire accent (red/orange) — primary CTA buttons + urgency.
     fire50: "#FFF1EC", fire100: "#FFE0D4", orange400: "#FB8C3C",
     fire500: "#F93A25", fire600: "#E0311F", fire700: "#C72A1A",
     red50: "#FFF1EC", red100: "#F9A29A", red500: "#F93A25",
     red600: "#E0311F", red700: "#C72A1A",
     green50: "#DCFCE7", green500: "#16A34A",
     amber50: "#FEF3C7", amber500: "#D97706",
-    ink: "#161616",
     n0: "#FFFFFF", n50: "#F7F7F8", n200: "#E4E4E7", n300: "#D4D4D8",
     n400: "#A1A1AA", n500: "#52525B", n800: "#1C1C21",
     n900: "#18181B", n950: "#111114",
@@ -75,7 +74,7 @@ function Btn({ children, full, disabled }: { children: React.ReactNode; full?: b
   const base: React.CSSProperties = { fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", cursor: disabled ? "not-allowed" : "pointer", borderRadius: T.radius.lg, transition: `all ${T.tr.base}`, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "14px 28px", width: full ? "100%" : undefined };
   const v = disabled
     ? { background: T.color.n200, color: T.color.n400 }
-    : { background: h ? "#000000" : T.color.ink, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
+    : { background: h ? T.color.fire600 : T.color.fire500, color: "#fff", boxShadow: h ? T.shadow.md : T.shadow.sm, transform: h ? "translateY(-1px)" : "none" };
   return <button onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)} style={{ ...base, ...v }}>{children}</button>;
 }
 
@@ -286,7 +285,7 @@ function SampleDropCard({ d, delay }: { d: typeof SAMPLE_DROPS[number]; delay: n
             <button style={{
               width: "100%", fontFamily: T.font.display, fontWeight: 800, fontSize: "15px", letterSpacing: "0.02em",
               border: "none", borderRadius: T.radius.lg, padding: "15px 20px",
-              background: h ? "#000000" : T.color.ink, color: "#fff", cursor: "pointer",
+              background: h ? T.color.fire600 : T.color.fire500, color: "#fff", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
               boxShadow: h ? T.shadow.md : T.shadow.sm, transition: `all ${T.tr.base}`,
             }}>Reserve <span style={{ fontSize: "17px" }}>→</span></button>

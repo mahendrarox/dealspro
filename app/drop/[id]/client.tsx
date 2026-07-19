@@ -15,7 +15,6 @@ const T = {
   page: "#0A0A0A",
   card: "#FFFFFF",
   dark: "#18181B",
-  ink: "#161616",
   red: "#F93A25",
   redShadow: "0 4px 14px rgba(249, 58, 37, 0.35)",
   text: "#111827",
@@ -150,8 +149,8 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
       : disabled
         ? (sold ? "Sold Out" : ended ? "Ended" : pickupActive ? "Pickup in progress" : cancelled ? "Cancelled" : "Unavailable")
         : quantity === 1
-          ? `Claim for $${total}`
-          : `Claim ${quantity} spots for $${total}`;
+          ? `Reserve · $${total}`
+          : `Reserve ${quantity} spots · $${total}`;
 
   const bandLabel: CSSProperties = {
     fontFamily: T.mono,
@@ -455,12 +454,12 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           disabled={ctaDisabled || loading}
           style={{
             width: "100%", minHeight: 54, border: "none", borderRadius: "14px",
-            background: ctaDisabled ? "#E5E7EB" : T.ink,
+            background: ctaDisabled ? "#E5E7EB" : T.red,
             color: ctaDisabled ? T.textDim : "#fff",
             fontFamily: T.display, fontWeight: 800, fontSize: "17px",
             cursor: ctaDisabled || loading ? "default" : "pointer",
             transition: "all 150ms ease",
-            boxShadow: ctaDisabled ? "none" : "0 8px 24px rgba(0,0,0,0.32)",
+            boxShadow: ctaDisabled ? "none" : "0 4px 20px rgba(249,58,37,0.4)",
           }}
         >
           {ctaText}
