@@ -12,6 +12,7 @@ import {
   DEALSPRO_PRIVACY_LABEL,
   splitDisclosureForLinks,
 } from "@/lib/legal/opt-in-copy";
+import { DP } from "@/lib/theme/tokens";
 
 /**
  * Zero-claimable-drops capture state for /r/[slug].
@@ -34,13 +35,13 @@ function formatPhone(val: string): string {
 }
 
 const T = {
-  red: "#F93A25",
-  green: "#22C55E",
-  text: "#F4F4F5",
-  muted: "#A1A1AA",
-  panel: "#14141A",
-  border: "#27272A",
-  input: "#0A0A0A",
+  red: DP.brand[500],
+  green: DP.success.check,
+  text: DP.dark.rText,
+  muted: DP.zinc[400],
+  panel: DP.dark.rPanel,
+  border: DP.dark.rBorder,
+  input: DP.dark.page,
   display: "'DM Sans', sans-serif",
 };
 
@@ -171,8 +172,8 @@ export default function RestaurantCapture({
           marginBottom: 16,
           padding: "14px 16px",
           borderRadius: 12,
-          background: optIn ? "rgba(34,197,94,0.08)" : "rgba(249,58,37,0.06)",
-          border: `1.5px solid ${optIn ? "rgba(34,197,94,0.25)" : "rgba(249,58,37,0.22)"}`,
+          background: optIn ? "rgba(34,197,94,0.08)" : DP.brandAlpha(0.06),
+          border: `1.5px solid ${optIn ? "rgba(34,197,94,0.25)" : DP.brandAlpha(0.22)}`,
         }}
       >
         <label
@@ -186,7 +187,7 @@ export default function RestaurantCapture({
               borderRadius: 6,
               flexShrink: 0,
               marginTop: 1,
-              border: `2px solid ${optIn ? T.green : "#3F3F46"}`,
+              border: `2px solid ${optIn ? T.green : DP.disabled.controlBg}`,
               background: optIn ? T.green : "transparent",
               display: "flex",
               alignItems: "center",
@@ -223,7 +224,7 @@ export default function RestaurantCapture({
           fontFamily: T.display,
           fontWeight: 700,
           fontSize: 16,
-          background: valid && !loading ? T.red : "#3F3F46",
+          background: valid && !loading ? T.red : DP.disabled.controlBg,
           color: valid && !loading ? "#fff" : T.muted,
           cursor: valid && !loading ? "pointer" : "default",
         }}

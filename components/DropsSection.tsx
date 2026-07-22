@@ -17,21 +17,25 @@ import {
   selectFeatured,
   getRemainingDrops,
 } from "@/lib/drops";
+import { DP } from "@/lib/theme/tokens";
 
 // ── Design tokens (shared with Homepage) ──
+// Color values are sourced from the centralized DealsPro token file so the
+// cards, CTAs and urgency states share one source of truth. Local names are
+// kept so existing usage sites (T.color.fire500, …) are unchanged.
 
 const T = {
   color: {
     // DealsPro fire accent (red/orange) — primary CTA buttons + urgency.
-    fire50: "#FFF1EC", fire100: "#FFE0D4", orange400: "#FB8C3C",
-    fire500: "#F93A25", fire600: "#E0311F", fire700: "#C72A1A",
-    red50: "#FFF1EC", red100: "#F9A29A", red500: "#F93A25",
-    red600: "#E0311F", red700: "#C72A1A",
-    green50: "#DCFCE7", green500: "#16A34A",
-    amber50: "#FEF3C7", amber500: "#D97706",
-    n0: "#FFFFFF", n50: "#F7F7F8", n200: "#E4E4E7", n300: "#D4D4D8",
-    n400: "#A1A1AA", n500: "#52525B", n800: "#1C1C21",
-    n900: "#18181B", n950: "#111114",
+    fire50: DP.brand[50], fire100: DP.brand[100], orange400: DP.brand.orange400,
+    fire500: DP.brand[500], fire600: DP.brand[600], fire700: DP.brand[700],
+    red50: DP.brand[50], red100: DP.brand.softRed100, red500: DP.brand[500],
+    red600: DP.brand[600], red700: DP.brand[700],
+    green50: DP.success.bg, green500: DP.success.fg,
+    amber50: DP.warning.bg, amber500: DP.warning.fg,
+    n0: DP.zinc[0], n50: DP.zinc[50], n200: DP.zinc[200], n300: DP.zinc[300],
+    n400: DP.zinc[400], n500: DP.zinc[600], n800: DP.zinc[800],
+    n900: DP.zinc[900], n950: DP.zinc[950],
   },
   font: { display: "'DM Sans', sans-serif", mono: "'JetBrains Mono', monospace" },
   shadow: {
@@ -111,16 +115,16 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
   else { statusText = `${claimed} claimed · ${remaining} left`; statusColor = T.color.n500; }
 
   // ── Pulse dot ──
-  const pulseColor = tier === "medium" ? "#FFB347" : (tier === "critical" || tier === "last") ? "#FF4D3A" : null;
+  const pulseColor = tier === "medium" ? DP.accent.pulseMedium : (tier === "critical" || tier === "last") ? DP.accent.pulseCritical : null;
 
   // ── Progress bar ──
   const fillPct = item.total_spots > 0 ? ((item.total_spots - remaining) / item.total_spots) * 100 : 100;
   const barGradient = {
-    sold_out: "linear-gradient(90deg, #666, #888)",
-    critical: "linear-gradient(90deg, #F93A25, #FF6B5A)",
-    last: "linear-gradient(90deg, #F93A25, #FF6B5A)",
-    medium: "linear-gradient(90deg, #FF9500, #FFB347)",
-    normal: "linear-gradient(90deg, #FB8C3C, #F93A25)",
+    sold_out: DP.gradient.barSoldOut,
+    critical: DP.gradient.barCriticalLast,
+    last: DP.gradient.barCriticalLast,
+    medium: DP.gradient.barMedium,
+    normal: DP.gradient.barNormal,
   }[tier];
 
   // ── Card styles (sold-out fully disabled) ──
@@ -134,7 +138,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
     <div ref={ref} onMouseEnter={() => !sold && setH(true)} onMouseLeave={() => setH(false)}
       style={{ background: T.color.n0, borderRadius: T.radius.xl, overflow: "hidden", border: `1px solid ${T.color.n200}`, boxShadow: cardShadow, transform: cardTransform, transition: `all ${T.tr.spring}`, opacity: vis ? cardOpacity : 0, animation: vis ? `fadeUp 0.5s ease ${delay}ms both` : "none", cursor: cardCursor }}>
       {/* ── Image section ── */}
-      <div style={{ position: "relative", width: "100%", height: featured ? 240 : 200, overflow: "hidden", background: "linear-gradient(135deg, #1f2937, #374151)" }}>
+      <div style={{ position: "relative", width: "100%", height: featured ? 240 : 200, overflow: "hidden", background: DP.gradient.imageFallbackSlate }}>
         {hasImage && (
           <img
             src={item.image_url}
@@ -180,7 +184,7 @@ export function DropCard({ item, spotsRemaining, delay = 0, distance, isAboveFol
         </div>
         {/* CTA */}
         {sold ? (
-          <button style={{ width: "100%", fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", borderRadius: T.radius.lg, padding: "14px 28px", background: "#555", color: "rgba(255,255,255,0.5)", cursor: "default", opacity: 0.7 }}>Sold Out</button>
+          <button style={{ width: "100%", fontFamily: T.font.display, fontWeight: 700, fontSize: "14px", letterSpacing: "0.03em", border: "none", borderRadius: T.radius.lg, padding: "14px 28px", background: DP.disabled.soldBg, color: DP.disabled.soldFg, cursor: "default", opacity: 0.7 }}>Sold Out</button>
         ) : (
           <Btn full disabled={disabled}>{disabled ? (ended ? "Ended" : "Ordering Closed") : `Reserve · $${item.price.toFixed(2)}`}</Btn>
         )}
@@ -225,9 +229,9 @@ function Shimmer() {
 // <DropCard/> above. "Reserve" routes to the opt-in so visitors get alerted
 // the moment real drops go live.
 const SAMPLE_DROPS = [
-  { tag: "DROP EXCLUSIVE", title: "Family Biryani Drop", place: "Sai Gayatri · Frisco", left: "Only 12 left", pickup: "Pickup Fri 6–8pm", price: "$39", detail: "Feeds 4–5", emoji: "🍛", grad: "linear-gradient(135deg, #F93A25, #FB8C3C)" },
-  { tag: "WEEKEND ONLY", title: "BBQ Family Platter", place: "Smokey's · Prosper", left: "Only 6 left", pickup: "Pickup Sat 12–2pm", price: "$45", detail: "Feeds 4", emoji: "🍖", grad: "linear-gradient(135deg, #C72A1A, #F97316)" },
-  { tag: "LIMITED BATCH", title: "Weekend Dessert Box", place: "Sweet Lane · Frisco", left: "Only 8 left", pickup: "Pickup Sun 10am–12pm", price: "$24", detail: "6 pieces", emoji: "🧁", grad: "linear-gradient(135deg, #E0311F, #FBBF24)" },
+  { tag: "DROP EXCLUSIVE", title: "Family Biryani Drop", place: "Sai Gayatri · Frisco", left: "Only 12 left", pickup: "Pickup Fri 6–8pm", price: "$39", detail: "Feeds 4–5", emoji: "🍛", grad: DP.gradient.card1 },
+  { tag: "WEEKEND ONLY", title: "BBQ Family Platter", place: "Smokey's · Prosper", left: "Only 6 left", pickup: "Pickup Sat 12–2pm", price: "$45", detail: "Feeds 4", emoji: "🍖", grad: DP.gradient.card2 },
+  { tag: "LIMITED BATCH", title: "Weekend Dessert Box", place: "Sweet Lane · Frisco", left: "Only 8 left", pickup: "Pickup Sun 10am–12pm", price: "$24", detail: "6 pieces", emoji: "🧁", grad: DP.gradient.card3 },
 ];
 
 function SampleDropCard({ d, delay }: { d: typeof SAMPLE_DROPS[number]; delay: number }) {
@@ -257,7 +261,7 @@ function SampleDropCard({ d, delay }: { d: typeof SAMPLE_DROPS[number]; delay: n
           </div>
           {/* Urgency — dominant solid fire pill with a live pulse dot */}
           <div style={{ position: "absolute", top: 12, right: 12 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.01em", padding: "6px 12px", borderRadius: T.radius.full, background: T.color.fire500, color: "#fff", boxShadow: "0 6px 16px rgba(249,58,37,0.42)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.01em", padding: "6px 12px", borderRadius: T.radius.full, background: T.color.fire500, color: "#fff", boxShadow: `0 6px 16px ${DP.brandAlpha(0.42)}` }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff", animation: "pulseDot 1.5s ease-in-out infinite" }} />
               {d.left}
             </span>

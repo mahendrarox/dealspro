@@ -17,33 +17,36 @@ import {
   DEALSPRO_PRIVACY_LABEL,
   splitDisclosureForLinks,
 } from "@/lib/legal/opt-in-copy";
+import { DP } from "@/lib/theme/tokens";
 
+// Color values sourced from the centralized DealsPro token file (single
+// source of truth). Local token names are unchanged so usage sites stay put.
 const T = {
   color: {
     // ── DealsPro fire accent (red/orange). Used for badges, urgency,
     //    highlights and glows. CTA *buttons* are black (n900/ink) — the
     //    fire palette is accent-only. ──
-    fire50: "#FFF1EC", fire100: "#FFE0D4", orange400: "#FB8C3C",
-    fire500: "#F93A25", fire600: "#E0311F", fire700: "#C72A1A",
+    fire50: DP.brand[50], fire100: DP.brand[100], orange400: DP.brand.orange400,
+    fire500: DP.brand[500], fire600: DP.brand[600], fire700: DP.brand[700],
     // Legacy red aliases (kept === fire for any incidental references).
-    red50: "#FFF1EC", red100: "#F9A29A", red500: "#F93A25",
-    red600: "#E0311F", red700: "#C72A1A",
-    green50: "#DCFCE7", green500: "#16A34A",
-    amber50: "#FEF3C7", amber500: "#D97706",
-    ink: "#161616",
-    n0: "#FFFFFF", n50: "#F7F7F8", n200: "#E4E4E7", n300: "#D4D4D8",
-    n400: "#A1A1AA", n500: "#52525B", n800: "#1C1C21",
-    n900: "#18181B", n950: "#111114",
+    red50: DP.brand[50], red100: DP.brand.softRed100, red500: DP.brand[500],
+    red600: DP.brand[600], red700: DP.brand[700],
+    green50: DP.success.bg, green500: DP.success.fg,
+    amber50: DP.warning.bg, amber500: DP.warning.fg,
+    ink: DP.ink,
+    n0: DP.zinc[0], n50: DP.zinc[50], n200: DP.zinc[200], n300: DP.zinc[300],
+    n400: DP.zinc[400], n500: DP.zinc[600], n800: DP.zinc[800],
+    n900: DP.zinc[900], n950: DP.zinc[950],
   },
   // Warm fire gradient for the hero highlight + accents.
-  fireGrad: "linear-gradient(120deg, #FB8C3C 0%, #F93A25 100%)",
+  fireGrad: DP.gradient.hero,
   font: { display: "'DM Sans', sans-serif", mono: "'JetBrains Mono', monospace" },
   shadow: {
     sm: "0 1px 2px rgba(0,0,0,0.05)",
     md: "0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05)",
     deal: "0 10px 30px rgba(24,24,24,0.10)",
     dealHover: "0 18px 44px rgba(24,24,24,0.16)",
-    focus: "0 0 0 3px rgba(249,58,37,0.3)",
+    focus: `0 0 0 3px ${DP.brandAlpha(0.3)}`,
   },
   radius: { sm: "6px", md: "8px", lg: "12px", xl: "16px", xxl: "24px", full: "9999px" },
   tr: { fast: "150ms ease", base: "200ms ease", spring: "300ms cubic-bezier(0.34,1.56,0.64,1)" },
@@ -58,8 +61,8 @@ const css = `
   @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
   @keyframes checkPop { 0%{transform:scale(0);opacity:0} 60%{transform:scale(1.2);opacity:1} 100%{transform:scale(1);opacity:1} }
   @keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
-  @keyframes consentNudge { 0%,100%{box-shadow:0 0 0 3px rgba(249,58,37,0.08)} 50%{box-shadow:0 0 0 6px rgba(249,58,37,0.18)} }
-  .fire-text { background-image: linear-gradient(120deg, #FB8C3C 0%, #F93A25 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: #F93A25; }
+  @keyframes consentNudge { 0%,100%{box-shadow:0 0 0 3px ${DP.brandAlpha(0.08)}} 50%{box-shadow:0 0 0 6px ${DP.brandAlpha(0.18)}} }
+  .fire-text { background-image: ${DP.gradient.hero}; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: ${DP.brand[500]}; }
   @media (prefers-reduced-motion: reduce) {
     .consent-nudge { animation: none !important; }
   }
@@ -97,7 +100,7 @@ function DPLogo({ size = 36, dark = false }) {
       />
       <span style={{
         fontFamily: T.font.display, fontSize: `${20 * s}px`, fontWeight: 800,
-        letterSpacing: "-0.02em", color: dark ? "#FFFFFF" : "#18181B", lineHeight: 1,
+        letterSpacing: "-0.02em", color: dark ? "#FFFFFF" : DP.zinc[900], lineHeight: 1,
       }}>
         Deals<span style={{ color: T.color.fire500 }}>Pro</span>
       </span>
@@ -200,11 +203,11 @@ function CaptureForm({ dark }) {
 
   // ── Border colors ────────────────────────────────────────────────
   // Priority: focus (brand red @ 0.4) > error (amber) > valid (green) > neutral grey.
-  const AMBER = "#F59E0B";
-  const VALID_GREEN = "#22C55E";
-  const NEUTRAL = "#D1D5DB";
-  const FOCUS_FIRE = "rgba(249, 58, 37, 0.55)";
-  const FOCUS_GLOW = "0 0 0 3px rgba(249, 58, 37, 0.12)";
+  const AMBER = DP.validation.invalid;
+  const VALID_GREEN = DP.validation.valid;
+  const NEUTRAL = DP.validation.neutralBorder;
+  const FOCUS_FIRE = DP.brandAlpha(0.55);
+  const FOCUS_GLOW = `0 0 0 3px ${DP.brandAlpha(0.12)}`;
 
   const phoneBorder =
     focus === "phone" ? FOCUS_FIRE :
@@ -280,8 +283,8 @@ function CaptureForm({ dark }) {
         marginBottom: "20px",
         padding: "14px 16px",
         borderRadius: T.radius.lg,
-        background: optIn ? "rgba(22,163,74,0.08)" : "rgba(249,58,37,0.06)",
-        border: `1.5px solid ${optIn ? "rgba(22,163,74,0.25)" : "rgba(249,58,37,0.22)"}`,
+        background: optIn ? "rgba(22,163,74,0.08)" : DP.brandAlpha(0.06),
+        border: `1.5px solid ${optIn ? "rgba(22,163,74,0.25)" : DP.brandAlpha(0.22)}`,
         transition: "background-color 150ms ease, border-color 150ms ease",
       }}>
         <label
@@ -351,20 +354,20 @@ function CaptureForm({ dark }) {
         borderRadius: T.radius.lg, fontFamily: T.font.display,
         fontWeight: allValid && !loading ? 700 : 500,
         fontSize: "16px", letterSpacing: "0.03em",
-        background: allValid && !loading ? T.color.fire500 : "#E5E7EB",
-        color: allValid && !loading ? "#FFFFFF" : "rgb(75, 85, 99)",
+        background: allValid && !loading ? T.color.fire500 : DP.disabled.bg,
+        color: allValid && !loading ? "#FFFFFF" : DP.disabled.fgText,
         opacity: allValid && !loading ? 1 : 0.9,
         cursor: loading ? "default" : "pointer",
         transition: "all 0.2s ease",
         display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
-        boxShadow: allValid && !loading ? "0 6px 18px rgba(249,58,37,0.4), 0 1px 3px rgba(0,0,0,0.12)" : "none",
+        boxShadow: allValid && !loading ? `0 6px 18px ${DP.brandAlpha(0.4)}, 0 1px 3px rgba(0,0,0,0.12)` : "none",
       }}>
         {loading ? "Setting up checkout..." : "Get drop alerts"}
         {allValid && !loading && <span style={{ fontSize: "18px" }}>→</span>}
       </button>
 
       {submitError && (
-        <div style={{ marginTop: "12px", padding: "12px 16px", borderRadius: T.radius.md, background: "rgba(249,58,37,0.1)", border: "1px solid rgba(249,58,37,0.25)", fontFamily: T.font.display, fontSize: "13px", color: "#F93A25" }}>
+        <div style={{ marginTop: "12px", padding: "12px 16px", borderRadius: T.radius.md, background: DP.danger.bgSoft, border: `1px solid ${DP.danger.border}`, fontFamily: T.font.display, fontSize: "13px", color: DP.danger.fg }}>
           {submitError}
         </div>
       )}
@@ -408,7 +411,7 @@ function HeroMockup() {
         {/* Panel header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 4px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22C55E", boxShadow: "0 0 0 3px rgba(34,197,94,0.25)" }} />
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: DP.success.check, boxShadow: "0 0 0 3px rgba(34,197,94,0.25)" }} />
             <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 700, color: "#fff" }}>Drops near you</span>
           </div>
           <span style={{ fontFamily: T.font.mono, fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>FRISCO, TX</span>
@@ -422,15 +425,15 @@ function HeroMockup() {
               borderRadius: "16px", padding: "12px 14px",
             }}>
               {/* Thumb */}
-              <div style={{ width: 52, height: 52, borderRadius: "12px", flexShrink: 0, background: "linear-gradient(135deg, #F93A25, #FB8C3C)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px" }}>🍽️</div>
+              <div style={{ width: 52, height: 52, borderRadius: "12px", flexShrink: 0, background: DP.gradient.card1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px" }}>🍽️</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: T.font.mono, fontSize: "9px", fontWeight: 800, letterSpacing: "0.08em", color: "#FDBA8C", marginBottom: "3px" }}>{d.tag}</div>
+                <div style={{ fontFamily: T.font.mono, fontSize: "9px", fontWeight: 800, letterSpacing: "0.08em", color: DP.accent.tagOnDark, marginBottom: "3px" }}>{d.tag}</div>
                 <div style={{ fontFamily: T.font.display, fontSize: "14px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</div>
                 <div style={{ fontFamily: T.font.display, fontSize: "11px", color: "rgba(255,255,255,0.55)" }}>{d.place} · {d.pickup}</div>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ fontFamily: T.font.mono, fontSize: "16px", fontWeight: 800, color: "#fff" }}>{d.price}</div>
-                <div style={{ fontFamily: T.font.display, fontSize: "10px", fontWeight: 800, color: "#FF8A5C" }}>{d.left}</div>
+                <div style={{ fontFamily: T.font.display, fontSize: "10px", fontWeight: 800, color: DP.accent.scarcityOnDark }}>{d.left}</div>
               </div>
             </div>
           ))}
@@ -495,9 +498,9 @@ export default function App({ initialDrops }: HomepageProps = {}) {
         <div className="hg" style={{ maxWidth: "1120px", margin: "0 auto", position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "60px", alignItems: "center" }}>
           <div style={{ animation: "fadeUp 0.6s ease both" }}>
             {/* Locality + live-count badge */}
-            <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "7px 14px", borderRadius: T.radius.full, background: "rgba(249,58,37,0.14)", border: "1px solid rgba(249,58,37,0.32)", marginBottom: "22px" }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#FB8C3C", boxShadow: "0 0 8px rgba(251,140,60,0.9)", animation: "pulseDot 1.6s ease-in-out infinite" }} />
-              <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: "#FFD9CC", letterSpacing: "0.01em" }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "7px 14px", borderRadius: T.radius.full, background: DP.brandAlpha(0.14), border: `1px solid ${DP.brandAlpha(0.32)}`, marginBottom: "22px" }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: DP.brand.orange400, boxShadow: "0 0 8px rgba(251,140,60,0.9)", animation: "pulseDot 1.6s ease-in-out infinite" }} />
+              <span style={{ fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: DP.accent.heroBadgeText, letterSpacing: "0.01em" }}>
                 {(() => { const n = dropsData.activeCount > 0 ? dropsData.activeCount : 3; return `This week in Frisco · ${n} drop${n === 1 ? "" : "s"} live`; })()}
               </span>
             </div>
@@ -508,8 +511,8 @@ export default function App({ initialDrops }: HomepageProps = {}) {
             <p style={{ fontFamily: T.font.display, fontSize: "17px", lineHeight: 1.6, color: T.color.n400, marginBottom: "22px", maxWidth: "480px" }}>The best local food, dropped in limited batches every week. Discover what's near you, reserve your spot, and pick it up fresh. When it's gone, it's gone.</p>
             {/* Trust / urgency line — sits right above the opt-in */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "18px" }}>
-              <span style={{ color: "#FB8C3C", fontSize: "15px", lineHeight: 1 }}>🔥</span>
-              <span style={{ fontFamily: T.font.display, fontSize: "13.5px", fontWeight: 600, color: "#FFD9CC", letterSpacing: "0.01em" }}>Limited weekly drops from local restaurants. No app required.</span>
+              <span style={{ color: DP.brand.orange400, fontSize: "15px", lineHeight: 1 }}>🔥</span>
+              <span style={{ fontFamily: T.font.display, fontSize: "13.5px", fontWeight: 600, color: DP.accent.heroBadgeText, letterSpacing: "0.01em" }}>Limited weekly drops from local restaurants. No app required.</span>
             </div>
             <CaptureForm dark />
           </div>

@@ -2,19 +2,21 @@ import { notFound, redirect } from "next/navigation";
 import { getRestaurantBySlug, getClaimableDropsForRestaurant } from "@/lib/restaurants/db";
 import { formatTimeWindow, formatDate } from "@/lib/drops/helpers";
 import RestaurantCapture from "./capture";
+import { DP } from "@/lib/theme/tokens";
 
 // Always resolve fresh: claimable counts change as drops sell out / go
 // live. `next.config.ts` adds `Cache-Control: no-store` for /r/:slug so the
 // 307 redirect (single-drop case) is never cached by a CDN.
 export const dynamic = "force-dynamic";
 
+// Colors sourced from the centralized DealsPro token file (local names kept).
 const T = {
-  bg: "#0A0A0A",
-  red: "#F93A25",
+  bg: DP.dark.page,
+  red: DP.brand[500],
   text: "#fff",
-  muted: "#A1A1AA",
-  panel: "#14141A",
-  border: "#27272A",
+  muted: DP.zinc[400],
+  panel: DP.dark.rPanel,
+  border: DP.dark.rBorder,
   display: "'DM Sans', sans-serif",
 };
 

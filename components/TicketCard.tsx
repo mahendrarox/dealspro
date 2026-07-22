@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DP } from "@/lib/theme/tokens";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -38,20 +39,21 @@ const F = {
   mono: "'JetBrains Mono', 'SF Mono', monospace",
 };
 
+// Colors sourced from the centralized DealsPro token file (local names kept).
 const C = {
-  page: "#F3F4F6",
-  white: "#FFFFFF",
-  dark: "#1F2937",
-  red: "#F93A25",
-  redShadow: "0 4px 14px rgba(249, 58, 37, 0.35)",
-  text: "#111827",
-  textMuted: "#6B7280",
-  textDim: "#9CA3AF",
-  green: "#16A34A",
-  greenBg: "#ECFDF5",
-  greenFg: "#059669",
-  redeemed: "#EF4444",
-  divider: "#E5E7EB",
+  page: DP.gray[50],
+  white: DP.zinc[0],
+  dark: DP.slate[800], // off-palette slate — centralized, not yet replaced
+  red: DP.brand[500],
+  redShadow: DP.shadow.brandGlow,
+  text: DP.gray[900],
+  textMuted: DP.gray[500],
+  textDim: DP.gray[400],
+  green: DP.success.fg,
+  greenBg: DP.success.bgAlt,
+  greenFg: DP.success.fgDeep,
+  redeemed: DP.danger.strong,
+  divider: DP.gray[200],
 };
 
 // ─── Formatting helpers ──────────────────────────────────────────────
@@ -144,7 +146,7 @@ function useCountdown(drop: TicketDrop | null, status: TicketStatus): CountdownS
 
   const target = now < start ? start : end;
   const label = now < start ? "Starts in" : "Pickup ends in";
-  const color = now < start ? "#FDE68A" : "#86EFAC";
+  const color = now < start ? DP.warning.soft : DP.success.light;
 
   const total = Math.max(0, target - now);
   const h = Math.floor(total / 3_600_000);
@@ -176,7 +178,7 @@ export default function TicketCard(props: TicketCardProps) {
   const statusColor =
     status === "active" ? C.white : status === "redeemed" ? C.redeemed : C.textDim;
   const statusBg =
-    status === "active" ? C.green : status === "redeemed" ? "#FEE2E2" : "#F3F4F6";
+    status === "active" ? C.green : status === "redeemed" ? DP.danger.strongBg : DP.gray[50];
   const statusPadding = status === "active" ? "6px 18px" : "5px 10px";
 
   const directionsUrl = drop ? buildDirectionsUrl(drop) : null;
@@ -271,7 +273,7 @@ export default function TicketCard(props: TicketCardProps) {
                   lineHeight: 1,
                 }}
               >
-                <span style={{ color: "#1A1A1A" }}>Deals</span>
+                <span style={{ color: DP.dark.confirmModal }}>Deals</span>
                 <span style={{ color: C.red }}>Pro</span>
               </span>
             </div>
@@ -305,7 +307,7 @@ export default function TicketCard(props: TicketCardProps) {
           {/* ── Section 2: Red Hero ── */}
           <div
             style={{
-              background: "linear-gradient(145deg, #F93A25 0%, #E8301A 50%, #D42A16 100%)",
+              background: DP.gradient.ticketFront,
               padding: "28px 24px",
               color: C.white,
             }}
@@ -645,7 +647,7 @@ export default function TicketCard(props: TicketCardProps) {
           {/* ── Section 5: Footer ── */}
           <div
             style={{
-              background: "#F3F4F6",
+              background: DP.gray[50],
               padding: "20px 24px 40px",
               textAlign: "center",
               fontSize: "13px",
