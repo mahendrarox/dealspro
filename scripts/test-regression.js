@@ -1443,6 +1443,7 @@ async function main() {
     await testOptInCopy();
     await testCanonicalClaimableAndSlug();
     await testConsentPreservation();
+    await testNameOptionalCapture();
     await testSmartUrlRoute();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
@@ -4853,6 +4854,8 @@ async function testConsentPreservation() {
       "sourceSlug never changes consent",
       "no PII returned from phone lookup",
       "name preserved on quick capture",
+      "existing name preserved on empty-string name",
+      "new phone, no name, consent → success",
     ].forEach((n) => skip(`Consent: ${n}`, "/api/lead not available"));
     return;
   }
@@ -4867,6 +4870,7 @@ async function testConsentPreservation() {
     src: "+13205550066",
     pii: "+13205550067",
     nm: "+13205550068",
+    noname: "+13205550069",
   };
   const all = Object.values(P);
   await supabase.from("users").delete().in("phone", all);
@@ -4944,9 +4948,84 @@ async function testConsentPreservation() {
     await post({ phone: P.nm });                // name-less capture must preserve it
     if ((await nameOf(P.nm)) === "Alice") pass("Consent: existing name preserved on name-less capture");
     else fail("Consent: name preservation", `name=${await nameOf(P.nm)}`);
+
+    // 10. an EMPTY-STRING name must also preserve the existing stored name
+    //     (never overwrite "Alice" with "" or null).
+    await post({ phone: P.nm, name: "" });
+    if ((await nameOf(P.nm)) === "Alice") pass("Consent: existing name preserved on empty-string name");
+    else fail("Consent: empty-string name preservation", `name=${await nameOf(P.nm)}`);
+
+    // 11. brand-new phone + NO name + valid phone + explicit consent → the
+    //     name-less opt-in must succeed and record consent.
+    const rNoName = await post({ phone: P.noname, optIn: true });
+    let bNoName = {};
+    try { bNoName = await rNoName.json(); } catch { /* ignore */ }
+    if (bNoName.success === true && (await consentOf(P.noname)) === true) {
+      pass("Consent: new phone, no name, valid phone + consent → success");
+    } else {
+      fail("Consent: name-less signup", `success=${bNoName.success}, consent=${await consentOf(P.noname)}`);
+    }
   } finally {
     await supabase.from("users").delete().in("phone", all);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 42b: Name-optional opt-in capture (phone + consent only)
+//   The customer opt-in surfaces must collect phone + consent ONLY (no name
+//   field), and name must be optional end-to-end with a name-safe welcome
+//   SMS. Source inspection (the HTTP harness can't drive React forms) plus a
+//   rendered-HTML check. DB-state name-optional behavior lives in Test 42.
+// ═══════════════════════════════════════════════════════════════════════
+async function testNameOptionalCapture() {
+  console.log("\n── Test 42b: Name-Optional Opt-In Capture ──");
+  const fs = require("fs");
+  const read = (p) => fs.readFileSync(path.resolve(__dirname, "..", p), "utf8");
+
+  // Homepage CaptureForm (hero + footer share this one component).
+  try {
+    const src = read("components/Homepage.tsx");
+    const validity = /allValid\s*=\s*phoneValid\s*&&\s*optIn/.test(src);        // #5 consent required
+    const tenDigits = /phoneValid\s*=\s*digits\.length\s*===\s*10/.test(src);   // #4 valid phone required
+    const noNameField = !src.includes("Your Name") && !src.includes('placeholder="e.g. Sarah"');
+    const noNameSent = !/name:\s*name\.trim\(\)/.test(src);
+    const centralizedCopy = src.includes("@/lib/legal/opt-in-copy");            // #7
+    if (validity && tenDigits && noNameField && noNameSent && centralizedCopy)
+      pass("Name-optional #1: Homepage opt-in is phone(10)+consent only, no name field/sent, centralized copy");
+    else fail("Name-optional #1: Homepage opt-in", `validity=${validity} ten=${tenDigits} noField=${noNameField} noSent=${noNameSent} copy=${centralizedCopy}`);
+  } catch (err) { fail("Name-optional #1: Homepage source", err.message); }
+
+  // /r/[slug] zero-drop capture — same phone + consent-only model. (#8)
+  try {
+    const src = read("app/r/[slug]/capture.tsx");
+    const validity = /valid\s*=\s*digits\.length\s*===\s*10\s*&&\s*optIn/.test(src);
+    const noNameField = !src.includes("Your first name");
+    const noNameSent = !/name:\s*name\.trim\(\)/.test(src);
+    const centralizedCopy = src.includes("@/lib/legal/opt-in-copy");
+    if (validity && noNameField && noNameSent && centralizedCopy)
+      pass("Name-optional #2: /r/[slug] capture is phone(10)+consent only, no name field/sent, centralized copy");
+    else fail("Name-optional #2: /r/[slug] capture", `validity=${validity} noField=${noNameField} noSent=${noNameSent} copy=${centralizedCopy}`);
+  } catch (err) { fail("Name-optional #2: /r capture source", err.message); }
+
+  // /api/lead welcome SMS must be name-safe, and stored name must be preserved. (#9)
+  try {
+    const src = read("app/api/lead/route.ts");
+    const guarded = /providedName\s*\?\s*`Hey \$\{providedName\}!/.test(src);
+    const noRawName = !/`Hey \$\{name[.}]/.test(src);                            // never interpolate raw `name`
+    const preserved = /name\?\.trim\(\)\s*\|\|\s*existing\?\.name/.test(src);
+    if (guarded && noRawName && preserved)
+      pass("Name-optional #3: /api/lead welcome SMS name-safe + stored name preserved");
+    else fail("Name-optional #3: /api/lead SMS/name", `guarded=${guarded} noRaw=${noRawName} preserved=${preserved}`);
+  } catch (err) { fail("Name-optional #3: /api/lead source", err.message); }
+
+  // Rendered homepage must present no name field. (#9 UI-side)
+  try {
+    const res = await fetchWithRetry(`${BASE_URL}/`);
+    const html = await res.text();
+    if (!html.includes("Your Name") && !html.includes("e.g. Sarah"))
+      pass("Name-optional #4: rendered homepage shows no name field");
+    else fail("Name-optional #4: rendered homepage", "name label/placeholder still present");
+  } catch (err) { fail("Name-optional #4: GET /", err.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

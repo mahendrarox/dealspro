@@ -121,32 +121,24 @@ function Btn({ children, variant = "primary", full, disabled, onClick, style = {
 
 // ── Capture Form: Real-time validation ────────────────
 function CaptureForm({ dark }) {
-  const nameRef = useRef<HTMLInputElement>(null);
-  // NOTE: do NOT auto-focus on mount. The form lives below the hero on
-  // desktop; calling .focus() on an off-screen input causes the browser
-  // to scroll the input into view, skipping the hero. Users click the
-  // field naturally.
-  const [name, setName] = useState("");
+  // Opt-in requires only a valid phone + explicit consent — no name field
+  // (friction reduction). Name is never collected or sent from this form.
   const [phone, setPhone] = useState("");
   const [optIn, setOptIn] = useState(false);
   const [focus, setFocus] = useState(null);
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [nameTouched, setNameTouched] = useState(false);
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [consentTouched, setConsentTouched] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const digits = phone.replace(/\D/g, "");
-  const nameValid = name.trim().length > 0;
   const phoneValid = digits.length === 10;
-  const allValid = nameValid && phoneValid && optIn;
+  const allValid = phoneValid && optIn;
   const digitsLeft = 10 - digits.length;
 
   // Show validation only after the user has touched the field (blur)
   // OR after they attempt to submit. Initial render = clean, no errors.
-  const showNameError = (nameTouched || submitAttempted) && !nameValid;
-  const showNameOk = (nameTouched || submitAttempted) && nameValid;
   const showPhoneError = (phoneTouched || submitAttempted) && !phoneValid;
   const showPhoneOk = (phoneTouched || submitAttempted) && phoneValid;
   const showConsentError = (consentTouched || submitAttempted) && !optIn;
@@ -154,19 +146,18 @@ function CaptureForm({ dark }) {
   const submit = async () => {
     // Mark every field touched so any missing values surface their amber state
     setSubmitAttempted(true);
-    setNameTouched(true);
     setPhoneTouched(true);
     setConsentTouched(true);
 
     if (!allValid || loading) return;
     setLoading(true);
     setSubmitError("");
-    console.log("[Form] Submit received:", { name: name.trim(), phone: `+1${digits}` });
+    console.log("[Form] Submit received:", { phone: `+1${digits}` });
     try {
       const res = await fetch("/api/lead", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), phone: `+1${digits}`, optIn }),
+        body: JSON.stringify({ phone: `+1${digits}`, optIn }),
       });
       const data = await res.json();
       if (data.success) {
@@ -202,8 +193,8 @@ function CaptureForm({ dark }) {
       <div style={{ width: "60px", height: "60px", borderRadius: "50%", background: T.color.green500, display: "flex", alignItems: "center", justifyContent: "center", animation: "checkPop 0.5s cubic-bezier(0.34,1.56,0.64,1)" }}>
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
       </div>
-      <div style={{ fontFamily: T.font.display, fontWeight: 700, fontSize: "20px", color: dark ? "#fff" : T.color.n900 }}>You're in, {name.trim().split(" ")[0]}!</div>
-      <div style={{ fontFamily: T.font.display, fontSize: "14px", color: T.color.n400 }}>Check your phone for your first deals.</div>
+      <div style={{ fontFamily: T.font.display, fontWeight: 700, fontSize: "20px", color: dark ? "#fff" : T.color.n900 }}>You're on the list!</div>
+      <div style={{ fontFamily: T.font.display, fontSize: "14px", color: T.color.n400 }}>Check your phone — we'll text you the moment new drops go live.</div>
     </div>
   );
 
@@ -214,12 +205,6 @@ function CaptureForm({ dark }) {
   const NEUTRAL = "#D1D5DB";
   const FOCUS_FIRE = "rgba(249, 58, 37, 0.55)";
   const FOCUS_GLOW = "0 0 0 3px rgba(249, 58, 37, 0.12)";
-
-  const nameBorder =
-    focus === "name" ? FOCUS_FIRE :
-    showNameError ? AMBER :
-    showNameOk ? VALID_GREEN :
-    NEUTRAL;
 
   const phoneBorder =
     focus === "phone" ? FOCUS_FIRE :
@@ -245,38 +230,6 @@ function CaptureForm({ dark }) {
       <div style={{ textAlign: "center", marginBottom: "24px" }}>
         <div style={{ fontFamily: T.font.display, fontSize: "20px", fontWeight: 700, color: T.color.n900, marginBottom: "6px" }}>{DEALSPRO_OPT_IN_TITLE}</div>
         <div style={{ fontFamily: T.font.display, fontSize: "14px", color: T.color.n500 }}>{DEALSPRO_OPT_IN_SUBTITLE}</div>
-      </div>
-
-      {/* Name */}
-      <div style={{ marginBottom: "16px" }}>
-        <label style={{ display: "flex", alignItems: "center", gap: "6px", fontFamily: T.font.display, fontSize: "13px", fontWeight: 600, color: labelColor, marginBottom: "6px", letterSpacing: "0.01em" }}>
-          Your Name
-        </label>
-        <div style={{ position: "relative" }}>
-          <input ref={nameRef} type="text" placeholder="e.g. Sarah" value={name}
-            onChange={e => setName(e.target.value)}
-            onFocus={() => setFocus("name")}
-            onBlur={() => { setFocus(null); setNameTouched(true); }}
-            style={{
-              width: "100%",
-              padding: "16px 44px 16px 16px",
-              border: `2px solid ${nameBorder}`,
-              borderRadius: T.radius.lg,
-              fontFamily: T.font.display, fontSize: "16px", fontWeight: 500,
-              color: T.color.n900, background: inputBg, outline: "none",
-              boxShadow: focus === "name" ? FOCUS_GLOW : "none",
-              transition: "border-color 150ms ease, box-shadow 150ms ease",
-            }}
-          />
-          {showNameOk && (
-            <div style={{ position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)" }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={VALID_GREEN} strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </div>
-          )}
-        </div>
-        {showNameError && (
-          <div style={{ fontFamily: T.font.display, fontSize: "12px", color: AMBER, marginTop: "6px", paddingLeft: "2px" }}>Please enter your name</div>
-        )}
       </div>
 
       {/* Phone */}
@@ -399,7 +352,7 @@ function CaptureForm({ dark }) {
         fontWeight: allValid && !loading ? 700 : 500,
         fontSize: "16px", letterSpacing: "0.03em",
         background: allValid && !loading ? T.color.fire500 : "#E5E7EB",
-        color: allValid && !loading ? "#FFFFFF" : `rgb(${Math.max(75 - name.trim().length * 8, 24)}, ${Math.max(85 - name.trim().length * 8, 24)}, ${Math.max(99 - name.trim().length * 8, 36)})`,
+        color: allValid && !loading ? "#FFFFFF" : "rgb(75, 85, 99)",
         opacity: allValid && !loading ? 1 : 0.9,
         cursor: loading ? "default" : "pointer",
         transition: "all 0.2s ease",

@@ -51,7 +51,7 @@ export default function RestaurantCapture({
   restaurantName: string;
   sourceSlug: string;
 }) {
-  const [name, setName] = useState("");
+  // Opt-in requires only a valid phone + explicit consent — no name field.
   const [phone, setPhone] = useState("");
   const [optIn, setOptIn] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -59,7 +59,7 @@ export default function RestaurantCapture({
   const [error, setError] = useState("");
 
   const digits = phone.replace(/\D/g, "");
-  const valid = name.trim().length > 0 && digits.length === 10 && optIn;
+  const valid = digits.length === 10 && optIn;
 
   const submit = async () => {
     if (!valid || loading) return;
@@ -70,7 +70,6 @@ export default function RestaurantCapture({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
           phone: `+1${digits}`,
           optIn,
           sourceSlug,
@@ -151,16 +150,6 @@ export default function RestaurantCapture({
         <div style={{ fontFamily: T.display, fontSize: 14, color: T.muted }}>
           {DEALSPRO_OPT_IN_SUBTITLE}
         </div>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <input
-          type="text"
-          placeholder="Your first name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={inputStyle}
-        />
       </div>
 
       <div style={{ marginBottom: 16 }}>

@@ -76,8 +76,11 @@ export async function POST(request: NextRequest) {
   }
   console.log("[Lead] User upserted, id:", user.id);
 
-  // Send SMS only for full form submissions (homepage)
-  if (isFullForm && name) {
+  // Send the welcome SMS whenever THIS submission grants marketing consent
+  // (explicit opt-in). Name is optional now: personalize ONLY when a real
+  // name was actually provided, so a name-less opt-in never renders
+  // "Hey undefined" or a blank greeting.
+  if (explicitOptIn) {
     try {
       const twilioSid = process.env.TWILIO_ACCOUNT_SID;
       const twilioToken = process.env.TWILIO_AUTH_TOKEN;
@@ -89,8 +92,12 @@ export async function POST(request: NextRequest) {
 
         const appUrl = process.env.NEXT_PUBLIC_APP_URL;
         const dealsUrl = `${appUrl}/#deals`;
+        // Personalize only with a genuinely supplied name — never the
+        // stored "DealsPro User" placeholder, and never an empty greeting.
+        const providedName = name?.trim();
+        const greeting = providedName ? `Hey ${providedName}! ` : "";
         const message =
-          `Hey ${name.trim()}! Welcome to DealsPro 🔥\n\n` +
+          `${greeting}Welcome to DealsPro 🔥\n\n` +
           `This week's exclusive restaurant drops are live.\n` +
           `Browse deals: ${dealsUrl}\n\n` +
           `Reply STOP to unsubscribe.`;
