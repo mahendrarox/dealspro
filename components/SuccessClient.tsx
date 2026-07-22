@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import TicketCard, { type TicketCardProps } from "./TicketCard";
+import { DP } from "@/lib/theme/tokens";
 
 export type SuccessInitialData = TicketCardProps;
 
@@ -58,7 +59,7 @@ export default function SuccessClient({ initial }: { initial: SuccessInitialData
     <div
       style={{
         minHeight: "100vh",
-        background: "#F3F4F6",
+        background: DP.gray[50],
         fontFamily: F.display,
         display: "flex",
         alignItems: "center",
@@ -76,7 +77,7 @@ export default function SuccessClient({ initial }: { initial: SuccessInitialData
         style={{
           width: "100%",
           maxWidth: "420px",
-          background: "#FFFFFF",
+          background: DP.zinc[0],
           borderRadius: "20px",
           padding: "40px 28px",
           textAlign: "center",
@@ -89,8 +90,7 @@ export default function SuccessClient({ initial }: { initial: SuccessInitialData
             height: "160px",
             margin: "0 auto",
             borderRadius: "14px",
-            background:
-              "linear-gradient(90deg, #F3F4F6 25%, #E5E7EB 50%, #F3F4F6 75%)",
+            background: DP.gradient.shimmer,
             backgroundSize: "200% 100%",
             animation: "tc-shimmer 1.5s infinite",
           }}
@@ -100,7 +100,7 @@ export default function SuccessClient({ initial }: { initial: SuccessInitialData
             marginTop: "20px",
             fontSize: "16px",
             fontWeight: 700,
-            color: "#111827",
+            color: DP.gray[900],
           }}
         >
           Confirming your deal…
@@ -110,7 +110,7 @@ export default function SuccessClient({ initial }: { initial: SuccessInitialData
             marginTop: "6px",
             fontFamily: F.mono,
             fontSize: "12px",
-            color: "#9CA3AF",
+            color: DP.gray[400],
             letterSpacing: "0.05em",
           }}
         >

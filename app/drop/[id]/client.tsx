@@ -9,19 +9,21 @@ import {
   isPickupInProgress,
   hasEnded,
 } from "@/lib/drops/helpers";
+import { DP } from "@/lib/theme/tokens";
 
-// ─── Theme — matches TicketCard.tsx visual language ──────────────────
+// ─── Theme — matches TicketCard.tsx visual language. Colors sourced from
+//     the centralized DealsPro token file (local names unchanged). ────────
 const T = {
-  page: "#0A0A0A",
-  card: "#FFFFFF",
-  dark: "#18181B",
-  red: "#F93A25",
-  redShadow: "0 4px 14px rgba(249, 58, 37, 0.35)",
-  text: "#111827",
-  textMuted: "#6B7280",
-  textDim: "#9CA3AF",
-  greenFg: "#059669",
-  divider: "#E5E7EB",
+  page: DP.dark.page,
+  card: DP.zinc[0],
+  dark: DP.zinc[900],
+  red: DP.brand[500],
+  redShadow: DP.shadow.brandGlow,
+  text: DP.gray[900],
+  textMuted: DP.gray[500],
+  textDim: DP.gray[400],
+  greenFg: DP.success.fgDeep,
+  divider: DP.gray[200],
   display: "'DM Sans', -apple-system, 'Segoe UI', sans-serif",
   mono: "'JetBrains Mono', 'SF Mono', monospace",
 };
@@ -189,7 +191,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <div style={{
-            background: "#1a1a1a", borderRadius: "16px", padding: "32px 24px",
+            background: DP.dark.confirmModal, borderRadius: "16px", padding: "32px 24px",
             textAlign: "center", maxWidth: "300px", border: "1px solid rgba(255,255,255,0.1)",
           }}>
             <div style={{ fontSize: "28px", marginBottom: "8px" }}>🔒</div>
@@ -207,8 +209,8 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           maxWidth: "480px",
           background: T.card,
           borderRadius: "16px",
-          border: "1px solid #E4E4E7",
-          boxShadow: "0 4px 20px rgba(249,58,37,0.12)",
+          border: `1px solid ${DP.zinc[200]}`,
+          boxShadow: `0 4px 20px ${DP.brandAlpha(0.12)}`,
           overflow: "hidden",
           position: "relative",
         }}
@@ -221,7 +223,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
             aspectRatio: "3 / 2",
             maxHeight: "320px",
             overflow: "hidden",
-            background: "linear-gradient(135deg, #1c1c1e, #2b2b2f)",
+            background: DP.gradient.imageFallbackNeutral,
           }}
         >
           {hasImage && (
@@ -283,9 +285,9 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
                 display: "inline-flex", alignItems: "center", gap: "6px",
                 fontFamily: T.display, fontSize: "14px", fontWeight: 800, letterSpacing: "0.01em",
                 padding: "6px 13px", borderRadius: "9999px",
-                background: sold ? "#F3F4F6" : "rgba(249,58,37,0.10)",
+                background: sold ? DP.gray[50] : DP.brandAlpha(0.10),
                 color: sold ? T.textMuted : T.red,
-                border: `1px solid ${sold ? T.divider : "rgba(249,58,37,0.28)"}`,
+                border: `1px solid ${sold ? T.divider : DP.brandAlpha(0.28)}`,
               }}>
                 {scarcityText}
               </span>
@@ -294,7 +296,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
               <div style={{
                 width: `${Math.min(Math.max(fillPct, 0), 100)}%`,
                 height: "100%", borderRadius: "9999px",
-                background: "linear-gradient(90deg, #F93A25 0%, #D97706 100%)",
+                background: DP.gradient.dropDetailBar,
                 transition: "width 300ms ease",
               }} />
             </div>
@@ -303,8 +305,8 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           {error && (
             <div style={{
               padding: "10px 14px", borderRadius: "10px", textAlign: "center",
-              background: "rgba(249,58,37,0.1)", border: "1px solid rgba(249,58,37,0.3)",
-              color: T.red, fontSize: "13px", fontWeight: 600,
+              background: DP.danger.bgSoft, border: `1px solid ${DP.brandAlpha(0.3)}`,
+              color: DP.danger.fg, fontSize: "13px", fontWeight: 600,
             }}>
               {error}
             </div>
@@ -314,7 +316,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
             <div
               data-testid="already-claimed-banner"
               style={{
-                background: "#F3F4F6", border: `1px solid ${T.divider}`, borderRadius: "14px",
+                background: DP.gray[50], border: `1px solid ${T.divider}`, borderRadius: "14px",
                 padding: "18px 20px", textAlign: "center", color: T.text,
                 fontSize: "16px", lineHeight: 1.45, whiteSpace: "pre-line",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "8px",
@@ -325,7 +327,7 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
                 style={{
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                   width: "28px", height: "28px", borderRadius: "9999px",
-                  background: "#DCFCE7", color: T.greenFg, fontSize: "16px", fontWeight: 800,
+                  background: DP.success.bg, color: T.greenFg, fontSize: "16px", fontWeight: 800,
                 }}
               >
                 ✓
@@ -454,12 +456,12 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
           disabled={ctaDisabled || loading}
           style={{
             width: "100%", minHeight: 54, border: "none", borderRadius: "14px",
-            background: ctaDisabled ? "#E5E7EB" : T.red,
+            background: ctaDisabled ? DP.disabled.bg : T.red,
             color: ctaDisabled ? T.textDim : "#fff",
             fontFamily: T.display, fontWeight: 800, fontSize: "17px",
             cursor: ctaDisabled || loading ? "default" : "pointer",
             transition: "all 150ms ease",
-            boxShadow: ctaDisabled ? "none" : "0 4px 20px rgba(249,58,37,0.4)",
+            boxShadow: ctaDisabled ? "none" : `0 4px 20px ${DP.brandAlpha(0.4)}`,
           }}
         >
           {ctaText}

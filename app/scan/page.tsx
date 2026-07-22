@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
+import { DP } from "@/lib/theme/tokens";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -382,7 +383,7 @@ export default function ScanPage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#111114",
+        background: DP.zinc[950],
         fontFamily: "'DM Sans', sans-serif",
         display: "flex",
         flexDirection: "column",
@@ -398,7 +399,7 @@ export default function ScanPage() {
             fontSize: "11px",
             fontWeight: 800,
             letterSpacing: "0.12em",
-            color: "#F93A25",
+            color: DP.brand[500],
             textTransform: "uppercase",
             marginBottom: "8px",
           }}
@@ -415,7 +416,7 @@ export default function ScanPage() {
         >
           Redeem a Deal Card
         </h1>
-        <p style={{ fontSize: "14px", color: "#71717A", marginTop: "6px" }}>
+        <p style={{ fontSize: "14px", color: DP.zinc[500], marginTop: "6px" }}>
           Point the camera at the customer&apos;s QR code.
         </p>
       </div>
@@ -427,7 +428,7 @@ export default function ScanPage() {
             position: "relative",
             width: "100%",
             aspectRatio: "1 / 1",
-            background: "#0A0A0D",
+            background: DP.dark.scanPanel,
             borderRadius: "20px",
             overflow: "hidden",
             border: "1px solid rgba(255,255,255,0.08)",
@@ -481,7 +482,7 @@ export default function ScanPage() {
                 📷
               </div>
               <div
-                style={{ color: "#E4E4E7", fontSize: "15px", fontWeight: 600 }}
+                style={{ color: DP.zinc[200], fontSize: "15px", fontWeight: 600 }}
               >
                 {scannerState === "denied"
                   ? "Camera access denied — use manual entry below"
@@ -490,7 +491,7 @@ export default function ScanPage() {
                     : "Ready to scan QR codes"}
               </div>
               {scannerError && (
-                <div style={{ color: "#F93A25", fontSize: "12px" }}>
+                <div style={{ color: DP.brand[500], fontSize: "12px" }}>
                   {scannerError}
                 </div>
               )}
@@ -499,7 +500,7 @@ export default function ScanPage() {
                 disabled={scannerState === "starting"}
                 style={{
                   padding: "12px 24px",
-                  background: "#F93A25",
+                  background: DP.brand[500],
                   border: "none",
                   borderRadius: "12px",
                   color: "#FFFFFF",
@@ -543,7 +544,7 @@ export default function ScanPage() {
         {/* Manual entry */}
         <div
           style={{
-            background: "#1C1C21",
+            background: DP.zinc[800],
             borderRadius: "20px",
             padding: "20px",
             border: "1px solid rgba(255,255,255,0.06)",
@@ -555,7 +556,7 @@ export default function ScanPage() {
               display: "block",
               fontSize: "12px",
               fontWeight: 600,
-              color: "#71717A",
+              color: DP.zinc[500],
               textTransform: "uppercase",
               letterSpacing: "0.06em",
               marginBottom: "8px",
@@ -574,7 +575,7 @@ export default function ScanPage() {
             style={{
               width: "100%",
               padding: "14px 16px",
-              background: "#111114",
+              background: DP.zinc[950],
               border: "2px solid rgba(255,255,255,0.1)",
               borderRadius: "12px",
               color: "#FFFFFF",
@@ -591,12 +592,12 @@ export default function ScanPage() {
             style={{
               width: "100%",
               padding: "14px",
-              background: input.trim() ? "#F93A25" : "#1C1C21",
+              background: input.trim() ? DP.brand[500] : DP.zinc[800],
               border: input.trim()
                 ? "none"
                 : "2px solid rgba(255,255,255,0.1)",
               borderRadius: "12px",
-              color: input.trim() ? "#FFFFFF" : "#71717A",
+              color: input.trim() ? "#FFFFFF" : DP.zinc[500],
               fontFamily: "'DM Sans', sans-serif",
               fontWeight: 700,
               fontSize: "15px",
@@ -615,7 +616,7 @@ export default function ScanPage() {
                 background: "rgba(249,58,37,0.1)",
                 border: "1px solid rgba(249,58,37,0.2)",
                 borderRadius: "10px",
-                color: "#F93A25",
+                color: DP.brand[500],
                 fontSize: "13px",
               }}
             >
@@ -628,7 +629,7 @@ export default function ScanPage() {
         {phoneResults.length > 0 && (
           <div
             style={{
-              background: "#1C1C21",
+              background: DP.zinc[800],
               borderRadius: "20px",
               padding: "20px",
               border: "1px solid rgba(255,255,255,0.06)",
@@ -639,7 +640,7 @@ export default function ScanPage() {
               style={{
                 fontSize: "11px",
                 fontWeight: 600,
-                color: "#71717A",
+                color: DP.zinc[500],
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
                 marginBottom: "12px",
@@ -655,7 +656,7 @@ export default function ScanPage() {
                 <div
                   key={o.id}
                   style={{
-                    background: "#111114",
+                    background: DP.zinc[950],
                     borderRadius: "12px",
                     padding: "14px 16px",
                     border: "1px solid rgba(255,255,255,0.08)",
@@ -681,7 +682,7 @@ export default function ScanPage() {
                     <div
                       style={{
                         fontSize: "12px",
-                        color: "#71717A",
+                        color: DP.zinc[500],
                         marginTop: "3px",
                       }}
                     >
@@ -699,7 +700,7 @@ export default function ScanPage() {
                     disabled={phoneRedeeming === o.qr_token}
                     style={{
                       padding: "10px 18px",
-                      background: "#16A34A",
+                      background: DP.success.fg,
                       border: "none",
                       borderRadius: "8px",
                       color: "#FFFFFF",
@@ -776,7 +777,7 @@ function OrderCard({
 
   const statusBg =
     status === "active"
-      ? "#16A34A"
+      ? DP.success.fg
       : status === "redeemed"
         ? "rgba(239,68,68,0.15)"
         : "rgba(161,161,170,0.15)";
@@ -784,8 +785,8 @@ function OrderCard({
     status === "active"
       ? "#FFFFFF"
       : status === "redeemed"
-        ? "#EF4444"
-        : "#A1A1AA";
+        ? DP.danger.strong
+        : DP.zinc[400];
   const statusLabel =
     status === "active"
       ? "✓ Active"
@@ -800,7 +801,7 @@ function OrderCard({
   return (
     <div
       style={{
-        background: "#1C1C21",
+        background: DP.zinc[800],
         borderRadius: "20px",
         overflow: "hidden",
         border: "1px solid rgba(255,255,255,0.06)",
@@ -821,7 +822,7 @@ function OrderCard({
             {order.drop_title}
           </div>
           <div
-            style={{ fontSize: "13px", color: "#A1A1AA", marginTop: "2px" }}
+            style={{ fontSize: "13px", color: DP.zinc[400], marginTop: "2px" }}
           >
             {order.restaurant_name}
           </div>
@@ -903,7 +904,7 @@ function OrderCard({
               gap: "8px",
               width: "100%",
               padding: "12px",
-              background: "#1F2937",
+              background: DP.slate[800],
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: "12px",
               color: "#FFFFFF",
@@ -925,7 +926,7 @@ function OrderCard({
             style={{
               width: "100%",
               padding: "16px",
-              background: "#F93A25",
+              background: DP.brand[500],
               border: "none",
               borderRadius: "12px",
               color: "#FFFFFF",
@@ -953,7 +954,7 @@ function OrderCard({
                   background: "rgba(22, 163, 74, 0.15)",
                   border: "1px solid rgba(22, 163, 74, 0.4)",
                   borderRadius: "10px",
-                  color: "#86EFAC",
+                  color: DP.success.light,
                   fontWeight: 600,
                   fontSize: "14px",
                   textAlign: "center",
@@ -987,7 +988,7 @@ function OrderCard({
                   background: "rgba(239,68,68,0.1)",
                   border: "1px solid rgba(239,68,68,0.25)",
                   borderRadius: "12px",
-                  color: "#FECACA",
+                  color: DP.danger.strongText,
                   fontWeight: 600,
                   fontSize: "14px",
                   textAlign: "center",
@@ -1011,7 +1012,7 @@ function OrderCard({
               style={{
                 width: "100%",
                 padding: "14px",
-                background: "#F93A25",
+                background: DP.brand[500],
                 border: "none",
                 borderRadius: "12px",
                 color: "#FFFFFF",
@@ -1035,7 +1036,7 @@ function OrderCard({
               background: "rgba(161,161,170,0.1)",
               border: "1px solid rgba(161,161,170,0.2)",
               borderRadius: "12px",
-              color: "#A1A1AA",
+              color: DP.zinc[400],
               fontWeight: 600,
               fontSize: "14px",
               textAlign: "center",
@@ -1053,7 +1054,7 @@ function OrderCard({
               background: "rgba(249,58,37,0.1)",
               border: "1px solid rgba(249,58,37,0.2)",
               borderRadius: "10px",
-              color: "#F93A25",
+              color: DP.brand[500],
               fontSize: "13px",
             }}
           >
@@ -1083,7 +1084,7 @@ function DetailRow({
         gap: "12px",
       }}
     >
-      <span style={{ fontSize: "13px", color: "#71717A" }}>{label}</span>
+      <span style={{ fontSize: "13px", color: DP.zinc[500] }}>{label}</span>
       <span
         style={{
           fontSize: "13px",
