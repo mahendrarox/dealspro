@@ -378,7 +378,7 @@ function CreateDropForm({
             {fieldError("start_time") && <div style={errStyle}>{fieldError("start_time")}</div>}
           </div>
           <div style={fieldWrap}>
-            <label style={labelStyle}>Pickup ends</label>
+            <label style={labelStyle}>Pickup ends (auto-fills start + 2h)</label>
             <input
               type="datetime-local"
               value={values.end_time}
