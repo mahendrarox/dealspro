@@ -367,7 +367,7 @@ function CreateDropForm({
         {/* ─── Times ─── */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div style={fieldWrap}>
-            <label style={labelStyle}>Start Time</label>
+            <label style={labelStyle}>Pickup starts (ordering closes)</label>
             <input
               type="datetime-local"
               value={values.start_time}
@@ -378,7 +378,7 @@ function CreateDropForm({
             {fieldError("start_time") && <div style={errStyle}>{fieldError("start_time")}</div>}
           </div>
           <div style={fieldWrap}>
-            <label style={labelStyle}>End Time (auto-fills start + 2h)</label>
+            <label style={labelStyle}>Pickup ends (auto-fills start + 2h)</label>
             <input
               type="datetime-local"
               value={values.end_time}
@@ -391,6 +391,10 @@ function CreateDropForm({
             />
             {fieldError("end_time") && <div style={errStyle}>{fieldError("end_time")}</div>}
           </div>
+        </div>
+        {/* Helper for the datetime pair (rendered once, not per field). */}
+        <div style={{ fontSize: 12, color: T.muted, marginTop: -6, marginBottom: 14, lineHeight: 1.45 }}>
+          Ordering stays open from now until pickup begins. Set pickup to a future time or the drop won&apos;t be orderable.
         </div>
 
         {/* ─── Toggles ─── */}
