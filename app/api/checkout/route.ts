@@ -132,11 +132,14 @@ export async function POST(request: NextRequest) {
           quantity,
         },
       ],
-      // Cold visitors have no phone yet — let Stripe collect it. Opted-in
-      // visitors already supplied one, so skip the prompt for a faster flow.
-      ...(phone ? {} : { phone_number_collection: { enabled: true } }),
+      // Always collect & validate a phone at pay time. A stale localStorage
+      // dp_phone must never suppress this prompt — the transactional ticket
+      // SMS must reach a current, deliverable number. metadata.phone (below)
+      // is kept only as a fallback for when Stripe returns no customer phone;
+      // the webhook prefers the Stripe-collected number.
+      phone_number_collection: { enabled: true },
       metadata: {
-        // Only attach phone when known; never pass an empty string.
+        // Attach the known phone only as a fallback; never pass an empty string.
         ...(phone ? { phone } : {}),
         drop_item_id,
         quantity: String(quantity),

@@ -85,8 +85,10 @@ export async function POST(request: NextRequest) {
     });
 
     // ── Extract metadata ──
-    // Phone source: prefer the value the app attached (opted-in fast path),
-    // fall back to what Stripe collected during checkout (cold visitors).
+    // Phone source: prefer the number Stripe just COLLECTED & validated at
+    // checkout (customer_details.phone) over any app-attached metadata.phone,
+    // which may be a stale localStorage `dp_phone`. metadata.phone remains a
+    // fallback for the (now rare) case where Stripe returns no customer phone.
     // We guard each call so normalizePhone only ever receives a real string;
     // the first valid number wins, otherwise phone is null.
     const metaPhone = session.metadata?.phone
@@ -95,7 +97,7 @@ export async function POST(request: NextRequest) {
     const detailsPhone = session.customer_details?.phone
       ? normalizePhone(session.customer_details.phone)
       : "";
-    const phone = metaPhone || detailsPhone || null;
+    const phone = detailsPhone || metaPhone || null;
     const dropItemId = session.metadata?.drop_item_id;
     const quantity = parseInt(session.metadata?.quantity || "1") || 1;
 

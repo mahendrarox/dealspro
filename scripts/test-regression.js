@@ -1687,7 +1687,7 @@ async function testPr1ColdUserCheckout() {
   try {
     if (dropErr) {
       const reason = `temp drop insert failed: ${dropErr.message}`;
-      ["#1", "#2", "#3", "#4", "#5", "#6", "#8", "#9", "#10", "#11", "#12"].forEach((n) =>
+      ["#1", "#2", "#3", "#4", "#5", "#6", "#6b", "#8", "#9", "#10", "#11", "#12"].forEach((n) =>
         skip(`PR1 ${n}`, reason),
       );
       return;
@@ -1742,8 +1742,11 @@ async function testPr1ColdUserCheckout() {
         skip("PR1 #2: no-phone session config", "no checkoutUrl from #1");
       }
 
-      // #3: with-phone session preserves fast path (metadata.phone set,
-      //     phone_number_collection NOT enabled).
+      // #3: with-phone session ALSO enables phone_number_collection now.
+      //     Collection is unconditional (a stale localStorage number must
+      //     never suppress the prompt); metadata.phone is still attached, but
+      //     only as a fallback. Together with #2 this asserts the checkout
+      //     ALWAYS requests phone collection regardless of a passed phone.
       try {
         const res = await fetchWithRetry(`${BASE_URL}/api/checkout`, {
           method: "POST",
@@ -1759,9 +1762,9 @@ async function testPr1ColdUserCheckout() {
           const sid = sessionIdFromUrl(data.checkoutUrl);
           const sess = await stripe.checkout.sessions.retrieve(sid);
           const metaOk = sess.metadata && sess.metadata.phone === WITHPHONE;
-          const noCollect = !sess.phone_number_collection || sess.phone_number_collection.enabled !== true;
-          if (metaOk && noCollect) {
-            pass("PR1 #3: with-phone session → metadata.phone set, phone_number_collection disabled");
+          const collects = sess.phone_number_collection && sess.phone_number_collection.enabled === true;
+          if (metaOk && collects) {
+            pass("PR1 #3: with-phone session → phone_number_collection enabled (always collects) + metadata.phone kept as fallback");
           } else {
             fail("PR1 #3: with-phone session config", `metadata.phone=${sess.metadata?.phone}, enabled=${sess.phone_number_collection?.enabled}`);
           }
@@ -1773,7 +1776,7 @@ async function testPr1ColdUserCheckout() {
 
     // ── Webhook tests (#5, #6, #8, #9, #10, #11, #12) ──
     if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
-      ["#5", "#6", "#8", "#9", "#10", "#11", "#12"].forEach((n) =>
+      ["#5", "#6", "#6b", "#8", "#9", "#10", "#11", "#12"].forEach((n) =>
         skip(`PR1 ${n}`, "Stripe SDK or STRIPE_WEBHOOK_SECRET unavailable"),
       );
       return;
@@ -1823,31 +1826,63 @@ async function testPr1ColdUserCheckout() {
       fail("PR1 #5/#8/#12: cold webhook", err.message);
     }
 
-    // #6: metadata.phone wins over customer_details.phone.
+    // #6: customer_details.phone (Stripe-collected & validated at pay time)
+    //     WINS over metadata.phone (possibly-stale localStorage) when BOTH
+    //     are present. This is the core of the phone-collection fix.
     try {
       const res = await sendWebhook({
         id: metaSid,
         object: "checkout.session",
         payment_status: "paid",
         metadata: { phone: META_PHONE, drop_item_id: dropId, quantity: "1" },
-        customer_details: { phone: DETAILS_PHONE, name: "Meta Wins" },
+        customer_details: { phone: DETAILS_PHONE, name: "Details Wins" },
       });
       if (res.status !== 200) {
-        fail("PR1 #6: metadata-wins webhook", `Expected 200, got ${res.status}`);
+        fail("PR1 #6: customer_details-wins webhook", `Expected 200, got ${res.status}`);
       } else {
         const { data: order } = await supabase
           .from("orders")
           .select("phone")
           .eq("stripe_session_id", metaSid)
           .maybeSingle();
-        if (order && order.phone === META_PHONE) {
-          pass("PR1 #6: webhook prefers metadata.phone when both sources present");
+        if (order && order.phone === DETAILS_PHONE) {
+          pass("PR1 #6: webhook prefers customer_details.phone over metadata.phone when both present");
         } else {
-          fail("PR1 #6: metadata-wins", `Order phone=${order?.phone}, expected ${META_PHONE}`);
+          fail("PR1 #6: customer_details-wins", `Order phone=${order?.phone}, expected ${DETAILS_PHONE}`);
         }
       }
     } catch (err) {
-      fail("PR1 #6: metadata-wins webhook", err.message);
+      fail("PR1 #6: customer_details-wins webhook", err.message);
+    }
+
+    // #6b: metadata.phone is used as a FALLBACK when Stripe returns no
+    //      customer_details.phone. Precedence flipped, but metadata must still
+    //      resolve the order when the Stripe-collected number is absent.
+    try {
+      const fallbackSid = "test_pr1_fallback_" + Date.now();
+      const res = await sendWebhook({
+        id: fallbackSid,
+        object: "checkout.session",
+        payment_status: "paid",
+        metadata: { phone: META_PHONE, drop_item_id: dropId, quantity: "1" },
+        customer_details: { name: "No Stripe Phone" },
+      });
+      if (res.status !== 200) {
+        fail("PR1 #6b: metadata-fallback webhook", `Expected 200, got ${res.status}`);
+      } else {
+        const { data: order } = await supabase
+          .from("orders")
+          .select("phone")
+          .eq("stripe_session_id", fallbackSid)
+          .maybeSingle();
+        if (order && order.phone === META_PHONE) {
+          pass("PR1 #6b: webhook falls back to metadata.phone when customer_details.phone is absent");
+        } else {
+          fail("PR1 #6b: metadata-fallback", `Order phone=${order?.phone}, expected ${META_PHONE}`);
+        }
+      }
+    } catch (err) {
+      fail("PR1 #6b: metadata-fallback webhook", err.message);
     }
 
     // #9 + #10 + #11: duplicate webhook delivery is idempotent (same session
