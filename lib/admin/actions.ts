@@ -7,10 +7,10 @@ import {
   dropUpdateSchema,
   restaurantCreateSchema,
   restaurantUpdateSchema,
-  type DropUpdateInput,
   type RestaurantCreateInput,
   type RestaurantUpdateInput,
 } from "./schemas";
+import { toDbUpdateRow } from "./drop-row";
 import { adminDb } from "@/lib/supabase-admin";
 import { diffFields, logAdminAction } from "./log";
 import type { Restaurant, RestaurantOption } from "./restaurants/types";
@@ -36,18 +36,8 @@ type ArchiveResult =
       message?: string;
     };
 
-/**
- * Strip the form-only `location_mode` discriminator before persisting —
- * it's a client/server validation hint, not a DB column.
- */
-function toDbUpdateRow(parsed: DropUpdateInput) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { location_mode, ...rest } = parsed;
-  return {
-    ...rest,
-    image_url: rest.image_url || null,
-  };
-}
+// `toDbUpdateRow` lives in ./drop-row because this module is "use server"
+// (every export must be an async function). See that file for details.
 
 // ═══════════════════════════════════════════════════════════════════════
 // DROP — CREATE

@@ -88,8 +88,21 @@ function centralYMD(iso: string | Date): { y: number; m: number; d: number } {
 
 /** Format time window for display: "5–7 PM" or "11 AM–1 PM". */
 export function formatTimeWindow(item: DropItem): string {
-  const start = centralHM(item.start_time_iso);
-  const end = centralHM(item.end_time_iso);
+  return formatTimeWindowFromIso(item.start_time_iso, item.end_time_iso);
+}
+
+/**
+ * Same window formatting, addressed by raw UTC instants rather than a
+ * whole DropItem.
+ *
+ * This is the single implementation; `formatTimeWindow` above delegates
+ * to it. TicketCard consumes this directly instead of carrying its own
+ * copy, so the ticket, the drop page, the Stripe description and the SMS
+ * body cannot drift apart.
+ */
+export function formatTimeWindowFromIso(startIso: string, endIso: string): string {
+  const start = centralHM(startIso);
+  const end = centralHM(endIso);
   // Hour-only display unless minute is non-zero (mirrors the prior
   // format — minutes were always silently dropped before).
   const side = (hm: { hour: number; minute: number }) =>
@@ -102,7 +115,16 @@ export function formatTimeWindow(item: DropItem): string {
 
 /** Format date for display: "Friday, Mar 28" — in Central TZ. */
 export function formatDate(item: DropItem): string {
-  return new Date(item.start_time_iso).toLocaleDateString("en-US", {
+  return formatDateFromIso(item.start_time_iso);
+}
+
+/**
+ * Same date formatting, addressed by a raw UTC instant. Single
+ * implementation; `formatDate` delegates here. TicketCard uses this
+ * instead of deriving a date from a display string.
+ */
+export function formatDateFromIso(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
     weekday: "long",
     month: "short",
     day: "numeric",

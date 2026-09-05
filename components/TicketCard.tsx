@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DP } from "@/lib/theme/tokens";
+import { formatDateFromIso, formatTimeWindowFromIso } from "@/lib/drops/helpers";
 import { computeTicketPricing } from "@/lib/tickets/pricing";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -13,14 +14,15 @@ export interface TicketDrop {
   restaurantName: string;
   price: number;
   originalPrice: number | null;
-  date: string;        // "YYYY-MM-DD" — Central wall clock, display only
-  startTime: string;   // "HH:MM" 24h — Central wall clock, display only
-  endTime: string;     // "HH:MM" 24h — Central wall clock, display only
   /**
-   * Authoritative UTC instants. Countdown math MUST use these — the
-   * display strings above are Central wall clock and parsing them with
-   * `new Date(...)` resolves in the VIEWER's timezone, which skews the
-   * countdown for anyone outside Central.
+   * Authoritative UTC instants — the ONLY time input this component
+   * takes. Both the displayed date/window and the countdown derive from
+   * these via the shared Central-time formatter in lib/drops/helpers.
+   *
+   * The legacy `date`/`startTime`/`endTime` wall-clock strings were
+   * deliberately removed: parsing a wall-clock string with `new Date()`
+   * resolves in the VIEWER's timezone, which is the bug class this PR
+   * exists to eliminate.
    */
   startTimeIso: string;
   endTimeIso: string;
@@ -80,29 +82,6 @@ function maskPhone(raw: string | null | undefined): string | null {
   else if (digits.length === 10) ten = digits;
   else return null;
   return `+1 ${ten.slice(0, 3)} *** ${ten.slice(6, 10)}`;
-}
-
-function formatTimeWindow(start: string, end: string): string {
-  const fmt = (t: string) => {
-    const [h] = t.split(":").map(Number);
-    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    const ampm = h >= 12 ? "PM" : "AM";
-    return { hour12, ampm };
-  };
-  const s = fmt(start);
-  const e = fmt(end);
-  return s.ampm === e.ampm
-    ? `${s.hour12}–${e.hour12} ${e.ampm}`
-    : `${s.hour12} ${s.ampm}–${e.hour12} ${e.ampm}`;
-}
-
-function formatDayDate(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  return d.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
 }
 
 function formatRedeemedAt(iso: string): string {
@@ -202,8 +181,10 @@ export default function TicketCard(props: TicketCardProps) {
           : "This deal has already been redeemed."
         : "This deal has expired.";
 
-  const timeWindow = drop ? formatTimeWindow(drop.startTime, drop.endTime) : "";
-  const dayDate = drop ? formatDayDate(drop.date) : "";
+  // Shared Central-time formatter, fed the authoritative UTC instants —
+  // no local time formatting in this component.
+  const timeWindow = drop ? formatTimeWindowFromIso(drop.startTimeIso, drop.endTimeIso) : "";
+  const dayDate = drop ? formatDateFromIso(drop.startTimeIso) : "";
 
   return (
     <div

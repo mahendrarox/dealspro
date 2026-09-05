@@ -35,7 +35,9 @@ const {
   centralDateString,
   centralTimeString,
   formatTimeWindow,
+  formatTimeWindowFromIso,
   formatDate,
+  formatDateFromIso,
 } = require("../lib/drops/helpers");
 const { toIso, isoToLocal, addHoursToLocal, emptyDropForm } = require("../app/admin/drops/form-utils");
 const {
@@ -242,7 +244,109 @@ eq("Midnight date is the Central day", centralDateString("2026-05-20T05:00:00.00
 }
 
 // ══════════════════════════════════════════════════════════════════════
-section("2. Studio edit-form round-trip");
+section("2a. Edit-save round-trip through the PRODUCTION path");
+
+// Exercises the real production functions an untouched Studio save runs
+// through, in order:
+//
+//   stored UTC  →  isoToLocal()          app/admin/drops/[id]/page.tsx:56
+//               →  toIso()               drop-form.tsx EditDropForm.onSubmit
+//               →  dropUpdateSchema      lib/admin/actions.ts (updateDrop)
+//               →  toDbUpdateRow()       lib/admin/drop-row.ts
+//               →  the row handed to Supabase .update()
+//
+// The only step not executed is the Supabase network call itself, which
+// writes `nextRow` verbatim. Asserting on `nextRow` is therefore
+// equivalent to asserting on what lands in the column.
+//
+// This must fail if ANY link in that chain shifts the instant.
+{
+  let toDbUpdateRow = null;
+  try {
+    ({ toDbUpdateRow } = require("../lib/admin/drop-row"));
+  } catch (err) {
+    fail("Round-trip: load lib/admin/drop-row", err.message);
+  }
+
+  const STORED = [
+    ["CST (winter)", "2026-01-15T17:00:00.000Z", "2026-01-15T19:00:00.000Z"],
+    ["CDT (summer)", "2026-07-23T16:00:00.000Z", "2026-07-23T18:00:00.000Z"],
+    ["just before spring-forward", "2026-03-08T07:00:00.000Z", "2026-03-08T08:30:00.000Z"],
+    ["just after spring-forward", "2026-03-08T08:00:00.000Z", "2026-03-08T10:00:00.000Z"],
+    ["after fall-back", "2026-11-01T09:00:00.000Z", "2026-11-01T11:00:00.000Z"],
+    ["spans Central midnight", "2026-07-26T03:00:00.000Z", "2026-07-26T06:00:00.000Z"],
+    ["exact Central midnight", "2026-05-20T05:00:00.000Z", "2026-05-20T07:00:00.000Z"],
+    ["non-zero minutes", "2026-07-23T16:45:00.000Z", "2026-07-23T18:15:00.000Z"],
+  ];
+
+  for (const [label, startIso, endIso] of STORED) {
+    // 1. Hydrate exactly as the edit page does.
+    const hydratedStart = isoToLocal(startIso);
+    const hydratedEnd = isoToLocal(endIso);
+
+    // 2. Submit WITHOUT changing either field, exactly as the form does.
+    const submittedStart = toIso(hydratedStart);
+    const submittedEnd = toIso(hydratedEnd);
+
+    // 3. Server validation, exactly as updateDrop does.
+    const parsed = dropUpdateSchema.safeParse({
+      title: "Round Trip",
+      restaurant_name: "Round Trip Kitchen",
+      image_url: "",
+      price: 10,
+      original_price: 20,
+      total_spots: 7,
+      start_time: submittedStart,
+      end_time: submittedEnd,
+      is_active: true,
+      is_hero: false,
+      priority: 0,
+      location_mode: "manual",
+    });
+
+    if (!parsed.success) {
+      fail(
+        `Round-trip [${label}]: server validation rejected an untouched save`,
+        JSON.stringify(parsed.error.flatten().fieldErrors),
+      );
+      continue;
+    }
+
+    // 4. The row actually handed to Supabase.
+    if (!toDbUpdateRow) continue;
+    const row = toDbUpdateRow(parsed.data);
+
+    // 5. Compare INSTANTS, not text — the driver may reformat.
+    const startSame = new Date(row.start_time).getTime() === new Date(startIso).getTime();
+    const endSame = new Date(row.end_time).getTime() === new Date(endIso).getTime();
+
+    ok(
+      `Round-trip [${label}]: start instant unchanged`,
+      startSame,
+      `stored ${startIso} → hydrated "${hydratedStart}" → wrote ${row.start_time}`,
+    );
+    ok(
+      `Round-trip [${label}]: end instant unchanged`,
+      endSame,
+      `stored ${endIso} → hydrated "${hydratedEnd}" → wrote ${row.end_time}`,
+    );
+  }
+
+  // Negative control: the assertion above must be capable of failing.
+  // A deliberately shifted hydration must NOT survive the round trip.
+  {
+    const startIso = "2026-07-23T16:00:00.000Z";
+    const wrong = toIso(isoToLocal(startIso).replace("T11:", "T12:"));
+    ok(
+      "Round-trip: negative control — a shifted value is detected",
+      new Date(wrong).getTime() !== new Date(startIso).getTime(),
+      "a one-hour shift slipped through undetected; the assertion is vacuous",
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+section("2b. Hydration/serialization helpers in isolation");
 
 // The edit page hydrates datetime inputs from the RAW stored ISO via
 // isoToLocal, then saves via toIso. Loading a drop and saving it without
@@ -278,6 +382,71 @@ section("2. Studio edit-form round-trip");
     centralTimeString(iso) === "11:00" && iso.includes("16:00"),
     "display projection collided with the stored instant",
   );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+section("2c. TicketCard consumes the shared formatter (no local copy)");
+
+// TicketCard previously carried its own formatTimeWindow(start, end) and
+// formatDayDate(dateStr). Both are deleted; it now calls
+// formatTimeWindowFromIso / formatDateFromIso with the authoritative UTC
+// instants. These assertions pin the shared entry points TicketCard uses
+// and prove formatTimeWindow (DropItem) and formatTimeWindowFromIso
+// (raw instants) are the SAME implementation, not two that agree today.
+{
+  const cases = [
+    ["CST winter", "2026-01-15T17:00:00.000Z", "2026-01-15T19:00:00.000Z", "11 AM–1 PM", "Thursday, Jan 15"],
+    ["CDT summer", "2026-07-23T16:00:00.000Z", "2026-07-23T18:00:00.000Z", "11 AM–1 PM", "Thursday, Jul 23"],
+    ["evening, same meridiem", "2026-07-24T23:00:00.000Z", "2026-07-25T01:00:00.000Z", "6–8 PM", "Friday, Jul 24"],
+    ["spans Central midnight", "2026-07-26T03:00:00.000Z", "2026-07-26T06:00:00.000Z", "10 PM–1 AM", "Saturday, Jul 25"],
+    ["spring-forward boundary", "2026-03-08T07:00:00.000Z", "2026-03-08T08:00:00.000Z", "1–3 AM", "Sunday, Mar 8"],
+    ["fall-back boundary", "2026-11-01T09:00:00.000Z", "2026-11-01T11:00:00.000Z", "3–5 AM", "Sunday, Nov 1"],
+  ];
+
+  for (const [label, s, e, expectWindow, expectDate] of cases) {
+    eq(`TicketCard window [${label}]`, formatTimeWindowFromIso(s, e), expectWindow);
+    eq(`TicketCard date [${label}]`, formatDateFromIso(s), expectDate);
+    // Equivalence with the DropItem-shaped entry point used by the drop
+    // page, homepage cards, Stripe description and SMS body.
+    eq(
+      `TicketCard window matches drop-page window [${label}]`,
+      formatTimeWindowFromIso(s, e),
+      formatTimeWindow(item(s, e)),
+    );
+    eq(
+      `TicketCard date matches drop-page date [${label}]`,
+      formatDateFromIso(s),
+      formatDate(item(s, e)),
+    );
+  }
+
+  // The deleted local formatter dropped minutes entirely (it read only
+  // the hour of an "HH:MM" string), so an 11:45 start rendered as "11".
+  // The shared formatter preserves them — a real correctness gain.
+  eq(
+    "TicketCard window renders non-zero minutes (old local copy dropped them)",
+    formatTimeWindowFromIso("2026-07-23T16:45:00.000Z", "2026-07-23T18:15:00.000Z"),
+    "11:45 AM–1:15 PM",
+  );
+
+  // Guard against the duplicate creeping back in.
+  {
+    const fs = require("fs");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "..", "components", "TicketCard.tsx"),
+      "utf8",
+    );
+    ok(
+      "TicketCard declares no local time/date formatter",
+      !/function\s+formatTimeWindow\s*\(/.test(src) && !/function\s+formatDayDate\s*\(/.test(src),
+      "a local formatTimeWindow/formatDayDate reappeared in TicketCard",
+    );
+    ok(
+      "TicketCard performs no host-local date math",
+      !/getHours\(\)|getMinutes\(\)|getFullYear\(\)|getMonth\(\)|getDate\(\)/.test(src),
+      "TicketCard uses host-local Date getters again",
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -375,6 +544,106 @@ withFrozenNow("2026-07-01T00:00:00.000Z", () => {
     "expected an issue pathed to end_time",
   );
 });
+
+// ══════════════════════════════════════════════════════════════════════
+section("3b. No production write path bypasses pickup-window validation");
+
+// Structural guard. Validation only protects the data if EVERY
+// production write to drop_items goes through a schema that runs it.
+// This enumerates every `.insert(...)`/`.update(...)` against
+// drop_items across app/ and lib/ and pins the exact set.
+//
+// Two are schema-validated (createDrop -> dropCreateSchema,
+// updateDrop -> dropUpdateSchema); the other three write single
+// non-time columns. Adding any new write site — or widening one of the
+// narrow ones to touch a time column — changes this set and fails here,
+// forcing a deliberate decision instead of a silent bypass.
+//
+// Test-only fixtures that insert directly via the Supabase client in
+// scripts/ are intentionally out of scope: they are not a production
+// request path.
+{
+  const fs = require("fs");
+  const ROOTS = [path.resolve(__dirname, "..", "app"), path.resolve(__dirname, "..", "lib")];
+
+  const walk = (dir, out = []) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(p, out);
+      else if (/\.tsx?$/.test(entry.name)) out.push(p);
+    }
+    return out;
+  };
+
+  const writeRe =
+    /\.\s*from\("drop_items"\)([\s\S]{0,400}?)\.(insert|update)\(([^)]*(?:\([^)]*\)[^)]*)*)\)/g;
+
+  const sites = [];
+  for (const root of ROOTS) {
+    for (const file of walk(root)) {
+      const src = fs.readFileSync(file, "utf8");
+      let m;
+      while ((m = writeRe.exec(src)) !== null) {
+        sites.push({
+          file: path.relative(path.resolve(__dirname, ".."), file).replace(/\\/g, "/"),
+          op: m[2],
+          arg: m[3].trim().replace(/\s+/g, " "),
+        });
+      }
+    }
+  }
+
+  const EXPECTED = [
+    // Schema-validated: dropCreateSchema runs validatePickupWindow.
+    { file: "lib/admin/actions.ts", op: "insert", arg: "row" },
+    // Schema-validated: dropUpdateSchema runs validatePickupWindow.
+    { file: "lib/admin/actions.ts", op: "update", arg: "nextRow" },
+    // Single non-time column writes.
+    { file: "lib/admin/actions.ts", op: "update", arg: "{ is_active: newValue }" },
+    { file: "lib/admin/actions.ts", op: "update", arg: "{ is_hero: false }" },
+    { file: "lib/admin/actions.ts", op: "update", arg: "{ archived_at: new Date(" },
+  ];
+
+  eq("Write sites: expected count", sites.length, EXPECTED.length);
+
+  const norm = (s) => `${s.file}::${s.op}::${s.arg}`;
+  const actualSet = sites.map(norm).sort();
+  const expectedSet = EXPECTED.map(norm).sort();
+  ok(
+    "Write sites: exact set unchanged (no new/undocumented drop_items write)",
+    JSON.stringify(actualSet) === JSON.stringify(expectedSet),
+    `\n    actual:   ${JSON.stringify(actualSet, null, 2)}\n    expected: ${JSON.stringify(expectedSet, null, 2)}`,
+  );
+
+  // The three narrow writes must never carry a time column.
+  for (const s of sites) {
+    if (s.arg === "row" || s.arg === "nextRow") continue;
+    ok(
+      `Write site [${s.op} ${s.arg}] carries no time column`,
+      !/start_time|end_time/.test(s.arg),
+      "a narrow write started writing a pickup time without schema validation",
+    );
+  }
+
+  // And both validated builders must actually be fed schema output.
+  {
+    const src = fs.readFileSync(path.resolve(__dirname, "..", "lib", "admin", "actions.ts"), "utf8");
+    ok(
+      "createDrop validates with dropCreateSchema before insert",
+      /createDrop[\s\S]*?dropCreateSchema\.safeParse[\s\S]*?\.insert\(row\)/.test(src),
+    );
+    ok(
+      "updateDrop validates with dropUpdateSchema before update",
+      /updateDrop[\s\S]*?dropUpdateSchema\.safeParse[\s\S]*?\.update\(nextRow\)/.test(src),
+    );
+    ok(
+      "both drop schemas run the shared pickup-window validator",
+      /validatePickupWindow/.test(
+        fs.readFileSync(path.resolve(__dirname, "..", "lib", "admin", "schemas.ts"), "utf8"),
+      ),
+    );
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════════
 section("4. Ticket price/value framing");

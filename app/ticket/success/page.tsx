@@ -46,9 +46,6 @@ export default async function SuccessPage({
             price: item.price,
             originalPrice:
               item.original_price && item.original_price > 0 ? item.original_price : null,
-            date: item.date,
-            startTime: item.start_time,
-            endTime: item.end_time,
             startTimeIso: item.start_time_iso,
             endTimeIso: item.end_time_iso,
             address: item.address || null,
