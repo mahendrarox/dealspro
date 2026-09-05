@@ -1,12 +1,22 @@
 # Project Rules — DealsPro
 
-## Merge Rule (MANDATORY)
+## Session Rules (take precedence over everything below)
 
-After every task, if the work is on a branch (not `main`), automatically merge
-into `main` and push — but ONLY after `npm run test:regression` passes with
-**0 failures**.
+- Never merge or push unless the current task explicitly authorizes it.
+- On Windows/Git Bash, never run timezone tests via TZ= prefixes — TZ
+  does not propagate (MSYS mangles values containing a slash). Always
+  use `npm run test:datetime` and verify the printed "Intl resolved TZ"
+  line.
 
-- Do **NOT** wait for the user to ask for a merge.
+## Merge Rule
+
+When a task explicitly authorizes merging, merge the branch into `main` and
+push — but ONLY after `npm run test:regression` passes with **0 failures**.
+Without that authorization, finish on the branch and report; do not merge.
+
+- Merging/pushing requires explicit authorization in the current task
+  (see Session Rules above). Green tests are a precondition, never an
+  authorization.
 - Do **NOT** merge if any tests fail.
 - Skipped tests are acceptable (e.g. tests gated on manual Supabase migration
   application); failures are not.
