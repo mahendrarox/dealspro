@@ -43,6 +43,8 @@ export async function GET(request: NextRequest) {
         date: item.date,
         startTime: item.start_time,
         endTime: item.end_time,
+        startTimeIso: item.start_time_iso,
+        endTimeIso: item.end_time_iso,
         address: item.address || null,
         lat: item.lat || null,
         lng: item.lng || null,

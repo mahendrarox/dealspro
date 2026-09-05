@@ -159,3 +159,40 @@ export function getSavings(item: DropItem): number {
 export function getDiscountPct(item: DropItem): number {
   return Math.round(((item.original_price - item.price) / item.original_price) * 100);
 }
+
+// ─── Central display-string derivation (single source of truth) ──────
+//
+// `dbRowToDropItem` used to derive DropItem's legacy display strings
+// (`date`, `start_time`, `end_time`) with host-local getters
+// (getFullYear/getMonth/getDate/getHours/getMinutes). On Vercel the
+// process runs in UTC, so a correctly stored 16:00Z rendered as
+// "16:00" → "4 PM" instead of 11:00 AM Central.
+//
+// These two helpers are the ONLY sanctioned way to project a stored UTC
+// instant onto a Central wall-clock display string. They reuse the same
+// DISPLAY_TZ + Intl machinery as formatTimeWindow/formatDate above, so
+// every customer-facing surface agrees. Storage stays UTC — this is a
+// projection for display only, never a value to write back.
+
+/** "YYYY-MM-DD" for a UTC instant, in America/Chicago. */
+export function centralDateString(iso: string | Date): string {
+  const { y, m, d } = centralYMD(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${y}-${pad(m)}-${pad(d)}`;
+}
+
+/** "HH:MM" 24-hour for a UTC instant, in America/Chicago. */
+export function centralTimeString(iso: string | Date): string {
+  const date = typeof iso === "string" ? new Date(iso) : iso;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: DISPLAY_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  // Some engines emit "24" for midnight; normalize to "00".
+  const hour = m.hour === "24" ? "00" : m.hour;
+  return `${hour}:${m.minute}`;
+}

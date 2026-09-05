@@ -49,6 +49,8 @@ export default async function SuccessPage({
             date: item.date,
             startTime: item.start_time,
             endTime: item.end_time,
+            startTimeIso: item.start_time_iso,
+            endTimeIso: item.end_time_iso,
             address: item.address || null,
             lat: item.lat || null,
             lng: item.lng || null,
@@ -73,5 +75,5 @@ export default async function SuccessPage({
     }
   }
 
-  return <SuccessClient initial={initial} />;
+  return <SuccessClient initial={initial} sessionId={session_id ?? null} />;
 }

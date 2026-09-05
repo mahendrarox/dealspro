@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DP } from "@/lib/theme/tokens";
+import { computeTicketPricing } from "@/lib/tickets/pricing";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -12,9 +13,17 @@ export interface TicketDrop {
   restaurantName: string;
   price: number;
   originalPrice: number | null;
-  date: string;        // "YYYY-MM-DD"
-  startTime: string;   // "HH:MM" 24h
-  endTime: string;     // "HH:MM" 24h
+  date: string;        // "YYYY-MM-DD" — Central wall clock, display only
+  startTime: string;   // "HH:MM" 24h — Central wall clock, display only
+  endTime: string;     // "HH:MM" 24h — Central wall clock, display only
+  /**
+   * Authoritative UTC instants. Countdown math MUST use these — the
+   * display strings above are Central wall clock and parsing them with
+   * `new Date(...)` resolves in the VIEWER's timezone, which skews the
+   * countdown for anyone outside Central.
+   */
+  startTimeIso: string;
+  endTimeIso: string;
   address: string | null;
   lat: number | null;
   lng: number | null;
@@ -116,8 +125,8 @@ function buildDirectionsUrl(drop: TicketDrop): string | null {
   return null;
 }
 
-function toTimestamp(dateStr: string, timeStr: string): number {
-  return new Date(`${dateStr}T${timeStr}:00`).getTime();
+function toTimestamp(iso: string): number {
+  return new Date(iso).getTime();
 }
 
 // ─── Countdown hook ──────────────────────────────────────────────────
@@ -139,8 +148,8 @@ function useCountdown(drop: TicketDrop | null, status: TicketStatus): CountdownS
 
   if (!drop || status !== "active") return null;
 
-  const start = toTimestamp(drop.date, drop.startTime);
-  const end = toTimestamp(drop.date, drop.endTime);
+  const start = toTimestamp(drop.startTimeIso);
+  const end = toTimestamp(drop.endTimeIso);
 
   if (now >= end) return null;
 
@@ -166,12 +175,13 @@ export default function TicketCard(props: TicketCardProps) {
   const tokenDisplay = formatIdChunk(qrToken);
   const maskedPhone = maskPhone(phone);
 
-  const originalTotal =
-    drop && drop.originalPrice !== null && drop.originalPrice > 0
-      ? drop.originalPrice * quantity
-      : null;
-  const savings = originalTotal !== null ? Math.max(0, originalTotal - pricePaid) : 0;
-  const showSavings = originalTotal !== null && savings > 0;
+  // Shared, unit-tested framing math (lib/tickets/pricing.ts).
+  // price_paid is the ORDER TOTAL; originalPrice is PER UNIT.
+  const { originalTotal, savings, showSavings } = computeTicketPricing({
+    pricePaid,
+    originalPrice: drop?.originalPrice ?? null,
+    quantity,
+  });
 
   const statusLabel =
     status === "active" ? "✓ Active" : status === "redeemed" ? "Redeemed" : "Expired";
@@ -465,54 +475,97 @@ export default function TicketCard(props: TicketCardProps) {
               </span>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "baseline",
-                flexWrap: "wrap",
-                gap: "10px",
-                marginTop: "16px",
-              }}
-            >
-              <span
+            {/*
+              Price framing: every number is explicitly labelled.
+              `pricePaid` is the ORDER TOTAL (the webhook writes
+              price_paid = item.price * quantity), and `originalTotal` is
+              likewise multiplied by quantity, so the two are directly
+              comparable at any quantity. A bare crossed-out number used
+              to sit next to the paid amount with no label, which read as
+              ambiguous — it is now a labelled "Regular value" row.
+            */}
+            <div style={{ marginTop: "16px" }}>
+              <div
+                style={{
+                  fontFamily: F.mono,
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: C.textMuted,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  marginBottom: "2px",
+                }}
+              >
+                Paid
+              </div>
+              <div
                 style={{
                   fontFamily: F.mono,
                   fontSize: "28px",
                   fontWeight: 700,
                   color: C.text,
                   letterSpacing: "-0.02em",
+                  lineHeight: 1.1,
                 }}
               >
                 ${Number(pricePaid).toFixed(2)}
-              </span>
-              {showSavings && originalTotal !== null && (
-                <>
-                  <span
-                    style={{
-                      fontFamily: F.mono,
-                      fontSize: "15px",
-                      fontWeight: 500,
-                      color: C.textDim,
-                      textDecoration: "line-through",
-                    }}
-                  >
-                    ${originalTotal.toFixed(2)}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      background: C.greenBg,
-                      color: C.greenFg,
-                      padding: "3px 8px",
-                      borderRadius: "6px",
-                      letterSpacing: "0.02em",
-                    }}
-                  >
-                    Save ${savings.toFixed(2)}
-                  </span>
-                </>
-              )}
+              </div>
+
+              <dl
+                style={{
+                  margin: "12px 0 0",
+                  display: "grid",
+                  gridTemplateColumns: "auto auto",
+                  justifyContent: "start",
+                  columnGap: "10px",
+                  rowGap: "4px",
+                  fontSize: "13px",
+                }}
+              >
+                {showSavings && originalTotal !== null && (
+                  <>
+                    <dt style={{ color: C.textMuted, fontWeight: 500 }}>
+                      Regular value
+                    </dt>
+                    <dd
+                      style={{
+                        margin: 0,
+                        fontFamily: F.mono,
+                        fontWeight: 600,
+                        color: C.textMuted,
+                      }}
+                    >
+                      ${originalTotal.toFixed(2)}
+                    </dd>
+
+                    <dt style={{ color: C.greenFg, fontWeight: 700 }}>
+                      You saved
+                    </dt>
+                    <dd
+                      style={{
+                        margin: 0,
+                        fontFamily: F.mono,
+                        fontWeight: 700,
+                        color: C.greenFg,
+                      }}
+                    >
+                      ${savings.toFixed(2)}
+                    </dd>
+                  </>
+                )}
+
+                <dt style={{ color: C.textMuted, fontWeight: 500 }}>Quantity</dt>
+                <dd
+                  style={{
+                    margin: 0,
+                    fontFamily: F.mono,
+                    fontWeight: 600,
+                    color: C.textMuted,
+                  }}
+                >
+                  {quantity}
+                </dd>
+              </dl>
             </div>
 
             <div

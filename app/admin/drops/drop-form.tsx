@@ -11,6 +11,7 @@ import {
   type DropEditFormValues,
 } from "./form-utils";
 import ImageUpload from "@/app/admin/components/image-upload";
+import { validatePickupWindow } from "@/lib/admin/pickup-window";
 import type { RestaurantOption } from "@/lib/admin/restaurants/types";
 
 // Re-export for backward compatibility with existing imports.
@@ -151,6 +152,17 @@ function CreateDropForm({
     setFormError(null);
     setSuccess(null);
 
+    // Shared pickup-window rule — same implementation the server enforces.
+    // Client check is for fast feedback only; the server rejects
+    // independently (see lib/admin/schemas.ts).
+    const startIso = toIso(values.start_time);
+    const endIso = toIso(values.end_time);
+    const pickupWindow = validatePickupWindow(startIso, endIso);
+    if (!pickupWindow.ok) {
+      setFieldErrors({ end_time: [pickupWindow.message] });
+      return;
+    }
+
     const payload = {
       id: values.id.trim(),
       title: values.title.trim(),
@@ -159,8 +171,8 @@ function CreateDropForm({
       price: Number(values.price),
       original_price: values.original_price === "" ? null : Number(values.original_price),
       total_spots: Number(values.total_spots),
-      start_time: toIso(values.start_time),
-      end_time: toIso(values.end_time),
+      start_time: startIso,
+      end_time: endIso,
       is_active: values.is_active,
       is_hero: values.is_hero,
       priority: Number(values.priority) || 0,
@@ -472,6 +484,17 @@ function EditDropForm({ initial }: { initial: DropEditFormValues }) {
     setFormError(null);
     setSuccess(null);
 
+    // Shared pickup-window rule — same implementation the server enforces.
+    // A historical row with an out-of-range window must have its schedule
+    // corrected here before it can be saved; nothing is auto-clamped.
+    const startIso = toIso(values.start_time);
+    const endIso = toIso(values.end_time);
+    const pickupWindow = validatePickupWindow(startIso, endIso);
+    if (!pickupWindow.ok) {
+      setFieldErrors({ end_time: [pickupWindow.message] });
+      return;
+    }
+
     const payload = {
       title: values.title.trim(),
       restaurant_name: values.restaurant_name.trim(),
@@ -479,8 +502,8 @@ function EditDropForm({ initial }: { initial: DropEditFormValues }) {
       price: Number(values.price),
       original_price: values.original_price === "" ? null : Number(values.original_price),
       total_spots: Number(values.total_spots),
-      start_time: toIso(values.start_time),
-      end_time: toIso(values.end_time),
+      start_time: startIso,
+      end_time: endIso,
       is_active: values.is_active,
       is_hero: values.is_hero,
       priority: Number(values.priority) || 0,

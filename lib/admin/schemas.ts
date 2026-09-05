@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validatePickupWindow } from "./pickup-window";
 
 /** Drop ID: lowercase letters, digits, dashes only. Matches existing constants.ts IDs. */
 export const dropIdSchema = z
@@ -112,9 +113,13 @@ export const dropCreateSchema = z
     message: "original_price must be >= price",
     path: ["original_price"],
   })
-  .refine((d) => new Date(d.start_time).getTime() < new Date(d.end_time).getTime(), {
-    message: "start_time must be before end_time",
-    path: ["end_time"],
+  // Shared pickup-window rule (end > start, duration <= 12h). Server-side
+  // so a request that bypasses the client form is still rejected.
+  .superRefine((d, ctx) => {
+    const result = validatePickupWindow(d.start_time, d.end_time);
+    if (!result.ok) {
+      ctx.addIssue({ code: "custom", message: result.message, path: ["end_time"] });
+    }
   })
   .refine((d) => new Date(d.end_time).getTime() > Date.now(), {
     message: "end_time must be in the future",
@@ -160,9 +165,14 @@ export const dropUpdateSchema = z
     message: "original_price must be >= price",
     path: ["original_price"],
   })
-  .refine((d) => new Date(d.start_time).getTime() < new Date(d.end_time).getTime(), {
-    message: "start_time must be before end_time",
-    path: ["end_time"],
+  // Same shared pickup-window rule as create. Editing a historical row
+  // that violates it requires correcting the schedule before saving —
+  // by design, we never silently clamp an out-of-range window.
+  .superRefine((d, ctx) => {
+    const result = validatePickupWindow(d.start_time, d.end_time);
+    if (!result.ok) {
+      ctx.addIssue({ code: "custom", message: result.message, path: ["end_time"] });
+    }
   })
   .refine(
     (d) => {

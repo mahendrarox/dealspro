@@ -1,4 +1,5 @@
 import { adminDb } from "@/lib/supabase-admin";
+import { centralDateString, centralTimeString } from "./helpers";
 import type { DropItem } from "./types";
 
 /**
@@ -61,10 +62,14 @@ function dbRowToDropItem(row: DbDropRow): DropItem {
   if (Number.isNaN(start.getTime())) throw new Error(`[drops/db] Invalid start_time for ${row.id}`);
   if (Number.isNaN(end.getTime())) throw new Error(`[drops/db] Invalid end_time for ${row.id}`);
 
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const dateStr = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
-  const startTimeStr = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
-  const endTimeStr = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
+  // Display strings are Central wall clock, derived through the shared
+  // helper — NEVER host-local getters. `getHours()` et al. run in the
+  // process timezone (UTC on Vercel), which rendered a correctly stored
+  // 16:00Z as "16:00" → "4 PM" instead of 11:00 AM Central.
+  // The authoritative UTC instants below are untouched.
+  const dateStr = centralDateString(start);
+  const startTimeStr = centralTimeString(start);
+  const endTimeStr = centralTimeString(end);
 
   return {
     id: row.id,
