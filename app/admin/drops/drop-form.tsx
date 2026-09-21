@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createDrop, updateDrop } from "@/lib/admin/actions";
+import { linkPublishedSubmission } from "@/lib/intake/admin-actions";
 import {
   addHoursToLocal,
   DEFAULT_DROP_DURATION_HOURS,
@@ -56,6 +57,18 @@ type Props =
       mode: "create";
       initial: DropCreateFormValues;
       restaurants: RestaurantOption[];
+      /**
+       * Set when this form was prefilled from a restaurant submission
+       * (`/admin/submissions/[id]`). Two effects, both additive:
+       *   1. the smart defaults below are switched off, because every
+       *      prefilled value is something the restaurant actually stated
+       *      and must not be overwritten by a heuristic;
+       *   2. on a successful publish, the submission is linked to the
+       *      drop that was just created.
+       * Omitted for ordinary manual creation, which behaves exactly as
+       * it did before.
+       */
+      submissionId?: string;
     }
   | {
       mode: "edit";
@@ -65,7 +78,13 @@ type Props =
 
 export default function DropForm(props: Props) {
   if (props.mode === "create") {
-    return <CreateDropForm initial={props.initial} restaurants={props.restaurants} />;
+    return (
+      <CreateDropForm
+        initial={props.initial}
+        restaurants={props.restaurants}
+        submissionId={props.submissionId}
+      />
+    );
   }
   return <EditDropForm initial={props.initial} />;
 }
@@ -77,9 +96,11 @@ export default function DropForm(props: Props) {
 function CreateDropForm({
   initial,
   restaurants,
+  submissionId,
 }: {
   initial: DropCreateFormValues;
   restaurants: RestaurantOption[];
+  submissionId?: string;
 }) {
   const router = useRouter();
   const [values, setValues] = useState<DropCreateFormValues>(initial);
@@ -90,10 +111,18 @@ function CreateDropForm({
 
   // Track whether the admin has hand-edited derived fields. Once they
   // do, we stop overwriting their value from the smart-default chain.
+  //
+  // A submission arrives PRE-TOUCHED. Its pickup window, its price and
+  // its drop id are values the restaurant supplied (or that were
+  // collision-resolved server-side), and the smart defaults would
+  // silently rewrite all three — in particular `original_price = 2 ×
+  // price`, which would manufacture a discount the restaurant never
+  // offered. The admin can still edit every field by hand.
+  const prefilled = Boolean(submissionId);
   const touched = useRef({
-    end_time: false,
-    original_price: false,
-    id: false,
+    end_time: prefilled,
+    original_price: prefilled,
+    id: prefilled,
   });
 
   const update = <K extends keyof DropCreateFormValues>(key: K, value: DropCreateFormValues[K]) => {
@@ -181,6 +210,24 @@ function CreateDropForm({
     startTransition(async () => {
       const res = await createDrop(payload);
       if (res.ok) {
+        // Publishing already happened above, through the unchanged
+        // `createDrop()` path. Linking the submission is bookkeeping: if
+        // it fails the drop is still live and correct, so say so rather
+        // than implying the publish failed.
+        if (submissionId) {
+          const dropId = (res.data as { id?: string } | undefined)?.id;
+          if (dropId) {
+            const linked = await linkPublishedSubmission(submissionId, dropId);
+            if (!linked.ok) {
+              setSuccess(`Published ✓ — but: ${linked.error}`);
+              setTimeout(() => router.push("/admin/submissions"), 1800);
+              return;
+            }
+          }
+          setSuccess("Published ✓");
+          setTimeout(() => router.push("/admin/submissions"), 600);
+          return;
+        }
         setSuccess("Created ✓");
         setTimeout(() => router.push("/admin/drops"), 600);
       } else {

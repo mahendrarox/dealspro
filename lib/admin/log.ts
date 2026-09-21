@@ -8,7 +8,13 @@ export type AdminAction =
   | "archive_drop"
   | "create_restaurant"
   | "update_restaurant"
-  | "toggle_restaurant_active";
+  | "toggle_restaurant_active"
+  // Restaurant Drop intake. `drop_id` carries the restaurant id for a
+  // minted link and the published drop id for a publish, matching how
+  // each action is looked up later.
+  | "create_intake_link"
+  | "publish_submission"
+  | "reject_submission";
 
 /**
  * Append an admin log row. Fails silently so a logging error does not

@@ -1387,6 +1387,501 @@ async function cleanup() {
   console.log("  [OK] Cleanup complete");
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// TEST 44: Restaurant Drop Intake — DB-backed half
+//
+// The pure half (tokens, structured-output validation, prompt injection,
+// America/Chicago conversion, pickup-window rules, codebase invariants)
+// lives in scripts/test-intake.js and runs without infrastructure.
+//
+// What needs a database and a server lives here: restaurant isolation,
+// inactive-restaurant rejection, upload-route auth, MIME/size limits,
+// idempotency under concurrency, draft invisibility across every public
+// surface, admin-only review, and repeat-drop immutability.
+//
+// No paid LLM call is made anywhere in this file.
+// ═══════════════════════════════════════════════════════════════════════
+async function testRestaurantIntake() {
+  console.log("\n── Test 44: Restaurant Drop Intake ──");
+
+  const supabase = getSupabase();
+
+  // Does migration-009 exist in this environment?
+  const probe = await supabase.from("drop_submissions").select("id").limit(1);
+  if (probe.error) {
+    [
+      "invalid link → neutral page",
+      "valid link → restaurant intake page",
+      "expired link rejected",
+      "inactive restaurant rejected",
+      "upload route rejects a missing token",
+      "upload route rejects a tampered token",
+      "upload route rejects a bad MIME type",
+      "upload route rejects an oversize file",
+      "restaurant isolation: reuse photo is own-restaurant only",
+      "idempotent submission (double insert → one row)",
+      "draft invisible on every public surface",
+      "admin review queue requires a session",
+      "repeat drop gets a NEW id and URL",
+      "publishing leaves the previous drop untouched",
+    ].forEach((n) =>
+      skip(`Intake: ${n}`, "drop_submissions not migrated (apply migration-009-drop-submissions.sql)"),
+    );
+    return;
+  }
+
+  // Sign tokens with the SAME secret the server uses. Without it, the
+  // link-level tests cannot be meaningful.
+  const intakeSecret = process.env.INTAKE_JWT_SECRET;
+  const haveSecret = Boolean(intakeSecret && intakeSecret.length >= 32);
+
+  let signIntakeToken = null;
+  let getLastPublishedPhoto = null;
+  let generateUniqueDropId = null;
+  try {
+    ({ signIntakeToken } = require("../lib/intake/token.ts"));
+    ({ getLastPublishedPhoto } = require("../lib/intake/images.ts"));
+    ({ generateUniqueDropId } = require("../lib/intake/db.ts"));
+  } catch (err) {
+    skip("Intake: module load", `tsx/require unavailable — ${err.message}`);
+    return;
+  }
+
+  const stamp = Date.now();
+  const tag = `test-intake-${stamp}`;
+  let restA = null;
+  let restB = null;
+  const dropIds = [];
+  const submissionIds = [];
+
+  const mkRestaurant = (name, slug, isActive) => ({
+    name,
+    slug,
+    city: "Frisco",
+    tags: [tag],
+    address: "1 Test Rd, Frisco, TX",
+    latitude: 33.1,
+    longitude: -96.8,
+    place_id: null,
+    is_active: isActive,
+  });
+
+  try {
+    const insA = await supabase
+      .from("restaurants")
+      .insert(mkRestaurant("Intake Test Kitchen A", `${tag}-a`, true))
+      .select()
+      .single();
+    const insB = await supabase
+      .from("restaurants")
+      .insert(mkRestaurant("Intake Test Kitchen B", `${tag}-b`, true))
+      .select()
+      .single();
+    if (insA.error || insB.error) {
+      fail("Intake: seed restaurants", insA.error?.message || insB.error?.message);
+      return;
+    }
+    restA = insA.data;
+    restB = insB.data;
+
+    // ── Link-level page behaviour ─────────────────────────────────
+    if (!haveSecret) {
+      [
+        "invalid link → neutral page",
+        "valid link → restaurant intake page",
+        "expired link rejected",
+        "inactive restaurant rejected",
+        "upload route rejects a tampered token",
+        "upload route rejects a bad MIME type",
+        "upload route rejects an oversize file",
+      ].forEach((n) => skip(`Intake: ${n}`, "INTAKE_JWT_SECRET not set (min 32 chars)"));
+    } else {
+      // Invalid / forged token → neutral page, never a restaurant name.
+      {
+        const res = await fetchWithRetry(`${BASE_URL}/intake/not-a-real-token`);
+        const html = await res.text();
+        if (/no longer valid|expired/i.test(html) && !html.includes("Intake Test Kitchen")) {
+          pass("Intake: invalid link → neutral page, no restaurant leaked");
+        } else {
+          fail("Intake: invalid link", `status=${res.status}`);
+        }
+      }
+
+      // Valid token → the right restaurant.
+      {
+        const { token } = await signIntakeToken(restA.id);
+        const res = await fetchWithRetry(`${BASE_URL}/intake/${token}`);
+        const html = await res.text();
+        if (res.status === 200 && html.includes("Intake Test Kitchen A")) {
+          pass("Intake: valid link → that restaurant's intake page");
+        } else {
+          fail("Intake: valid link", `status=${res.status}`);
+        }
+        // A token-bearing URL must never be cached or indexed.
+        const cc = res.headers.get("cache-control") || "";
+        const robots = res.headers.get("x-robots-tag") || "";
+        if (cc.includes("no-store") && /noindex/i.test(robots)) {
+          pass("Intake: link page is no-store + noindex");
+        } else {
+          fail("Intake: link page headers", `cache-control=${cc} x-robots-tag=${robots}`);
+        }
+        // Isolation: A's link must never render B.
+        if (!html.includes("Intake Test Kitchen B")) {
+          pass("Intake: restaurant isolation — A's link never shows B");
+        } else {
+          fail("Intake: restaurant isolation", "B leaked into A's page");
+        }
+      }
+
+      // Expired token.
+      {
+        const { token } = await signIntakeToken(restA.id, { ttlSeconds: -60 });
+        const res = await fetchWithRetry(`${BASE_URL}/intake/${token}`);
+        const html = await res.text();
+        if (!html.includes("Intake Test Kitchen A")) {
+          pass("Intake: expired link is rejected");
+        } else {
+          fail("Intake: expired link", "expired token still rendered the restaurant");
+        }
+      }
+
+      // Deactivated restaurant → link dies immediately (revocation lever).
+      {
+        await supabase.from("restaurants").update({ is_active: false }).eq("id", restB.id);
+        const { token } = await signIntakeToken(restB.id);
+        const res = await fetchWithRetry(`${BASE_URL}/intake/${token}`);
+        const html = await res.text();
+        if (/not active/i.test(html) && !html.includes("Intake Test Kitchen B")) {
+          pass("Intake: deactivating a restaurant kills its outstanding links");
+        } else {
+          fail("Intake: inactive restaurant", "inactive partner still rendered");
+        }
+        await supabase.from("restaurants").update({ is_active: true }).eq("id", restB.id);
+      }
+
+      // ── Upload route auth + limits ──────────────────────────────
+      {
+        const form = new FormData();
+        form.append("image", new Blob([Buffer.from("x")], { type: "image/png" }), "a.png");
+        const res = await fetch(`${BASE_URL}/api/intake/upload-image`, {
+          method: "POST",
+          body: form,
+        });
+        if (res.status === 401) pass("Intake: upload route rejects a missing token (401)");
+        else fail("Intake: upload no token", `expected 401, got ${res.status}`);
+      }
+      {
+        const { token } = await signIntakeToken(restA.id);
+        const parts = token.split(".");
+        const tamperedToken = `${parts[0]}.${parts[1]}.${"A".repeat(parts[2].length)}`;
+        const form = new FormData();
+        form.append("token", tamperedToken);
+        form.append("image", new Blob([Buffer.from("x")], { type: "image/png" }), "a.png");
+        const res = await fetch(`${BASE_URL}/api/intake/upload-image`, {
+          method: "POST",
+          body: form,
+        });
+        if (res.status === 401) pass("Intake: upload route rejects a tampered token (401)");
+        else fail("Intake: upload tampered token", `expected 401, got ${res.status}`);
+      }
+      {
+        const { token } = await signIntakeToken(restA.id);
+        const form = new FormData();
+        form.append("token", token);
+        form.append("image", new Blob([Buffer.from("PK")], { type: "application/pdf" }), "a.pdf");
+        const res = await fetch(`${BASE_URL}/api/intake/upload-image`, {
+          method: "POST",
+          body: form,
+        });
+        if (res.status === 400) pass("Intake: upload route rejects a non-image MIME type (400)");
+        else fail("Intake: upload bad MIME", `expected 400, got ${res.status}`);
+      }
+      {
+        const { token } = await signIntakeToken(restA.id);
+        const big = Buffer.alloc(11 * 1024 * 1024, 1);
+        const form = new FormData();
+        form.append("token", token);
+        form.append("image", new Blob([big], { type: "image/jpeg" }), "big.jpg");
+        const res = await fetch(`${BASE_URL}/api/intake/upload-image`, {
+          method: "POST",
+          body: form,
+        });
+        if (res.status === 413) pass("Intake: upload route rejects an oversize file (413)");
+        else fail("Intake: upload oversize", `expected 413, got ${res.status}`);
+      }
+    }
+
+    // ── Reuse-photo isolation (own restaurant only) ───────────────
+    {
+      const aDrop = await insertTestDrop({
+        id: `test-intake-a-${stamp}`,
+        title: "A Published Drop",
+        restaurant_name: "Intake Test Kitchen A",
+        restaurant_id: restA.id,
+        image_url: "https://cdn.test/a-photo.webp",
+      });
+      dropIds.push(aDrop.id);
+
+      const forA = await getLastPublishedPhoto(restA.id);
+      const forB = await getLastPublishedPhoto(restB.id);
+
+      if (forA && forA.image_url === "https://cdn.test/a-photo.webp") {
+        pass("Intake: reuse offers this restaurant's own published photo");
+      } else {
+        fail("Intake: reuse own photo", `got ${JSON.stringify(forA)}`);
+      }
+      if (forB === null) {
+        pass("Intake: restaurant isolation — B is never offered A's photo");
+      } else {
+        fail("Intake: reuse isolation", `B got ${JSON.stringify(forB)}`);
+      }
+    }
+
+    // ── Idempotent submission ─────────────────────────────────────
+    {
+      const key = `idem-${stamp}`;
+      const row = {
+        restaurant_id: restA.id,
+        status: "submitted",
+        raw_message: "biryani tonight",
+        draft: {
+          title: "Idempotency Test Box",
+          price: 12,
+          original_price: null,
+          total_spots: 10,
+          pickup_date: "2099-06-01",
+          pickup_start_time: "17:00",
+          pickup_end_time: "19:00",
+        },
+        image_url: "https://cdn.test/a-photo.webp",
+        image_source: "reuse",
+        image_provenance: {},
+        photo_attestation: true,
+        attested_at: new Date().toISOString(),
+        idempotency_key: key,
+        intake_token_jti: `jti-${stamp}`,
+      };
+
+      const first = await supabase.from("drop_submissions").insert(row).select().single();
+      if (first.error) {
+        fail("Intake: idempotent submission", `first insert failed: ${first.error.message}`);
+      } else {
+        submissionIds.push(first.data.id);
+
+        // Two concurrent duplicates, exactly as a double-tap would look.
+        const [d1, d2] = await Promise.all([
+          supabase.from("drop_submissions").insert(row).select().single(),
+          supabase.from("drop_submissions").insert(row).select().single(),
+        ]);
+        const bothRejected = Boolean(d1.error) && Boolean(d2.error);
+
+        const { data: all } = await supabase
+          .from("drop_submissions")
+          .select("id")
+          .eq("restaurant_id", restA.id)
+          .eq("idempotency_key", key);
+
+        if (bothRejected && (all ?? []).length === 1) {
+          pass("Intake: concurrent double-submit collapses to exactly one row");
+        } else {
+          fail(
+            "Intake: idempotent submission",
+            `rejected=${bothRejected} rows=${(all ?? []).length}`,
+          );
+        }
+      }
+
+      // Attestation is enforced by the DATABASE, not just the app.
+      const unattested = await supabase
+        .from("drop_submissions")
+        .insert({ ...row, idempotency_key: `no-attest-${stamp}`, photo_attestation: false })
+        .select()
+        .single();
+      if (unattested.error) {
+        pass("Intake: an unattested submission is refused by the DB constraint");
+      } else {
+        submissionIds.push(unattested.data.id);
+        fail("Intake: attestation constraint", "an unattested row was accepted");
+      }
+    }
+
+    // ── Draft invisibility across every public surface ────────────
+    {
+      const title = "Idempotency Test Box";
+
+      // 1. No drop row was created by submitting.
+      const { data: dropRows } = await supabase
+        .from("drop_items")
+        .select("id")
+        .eq("restaurant_id", restA.id);
+      const onlyTheSeeded =
+        (dropRows ?? []).length === 1 && dropRows[0].id === `test-intake-a-${stamp}`;
+      if (onlyTheSeeded) {
+        pass("Intake: submitting created NO drop_items row");
+      } else {
+        fail("Intake: draft invisibility", `${(dropRows ?? []).length} drop rows for restaurant A`);
+      }
+
+      // 2. Public list API.
+      if (infra.publicDrops) {
+        const res = await fetchWithRetry(`${BASE_URL}/api/public/drops`);
+        const data = await res.json();
+        const leaked = (data.drops ?? []).some((d) => d.title === title);
+        if (!leaked) pass("Intake: submission absent from /api/public/drops");
+        else fail("Intake: public drops leak", "submission title present");
+      } else {
+        skip("Intake: submission absent from /api/public/drops", "/api/public/drops unavailable");
+      }
+
+      // 3. Storefront SSR.
+      {
+        const res = await fetchWithRetry(`${BASE_URL}/`);
+        const html = await res.text();
+        if (!html.includes(title)) pass("Intake: submission absent from the storefront");
+        else fail("Intake: storefront leak", "submission title rendered on /");
+      }
+
+      // 4. Spots enumeration — the id-disclosure surface.
+      {
+        const res = await fetchWithRetry(`${BASE_URL}/api/drops/spots`);
+        const map = await res.json();
+        const ids = Object.keys(map || {});
+        const leaked = submissionIds.filter((id) => ids.includes(id));
+        if (leaked.length === 0) {
+          pass("Intake: no submission id appears in /api/drops/spots");
+        } else {
+          fail("Intake: spots leak", `leaked ${leaked.join(",")}`);
+        }
+      }
+
+      // 5. The submission id is not addressable as a drop.
+      if (submissionIds.length > 0) {
+        const res = await fetchWithRetry(`${BASE_URL}/drop/${submissionIds[0]}`);
+        const html = await res.text();
+        if (/no longer available/i.test(html)) {
+          pass("Intake: a submission id is not addressable at /drop/[id]");
+        } else {
+          fail("Intake: drop page leak", `status=${res.status}`);
+        }
+      }
+
+      // 6. Checkout refuses it outright.
+      if (infra.checkout && submissionIds.length > 0) {
+        const res = await fetch(`${BASE_URL}/api/checkout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ drop_item_id: submissionIds[0], phone: TEST_PHONE }),
+        });
+        if (res.status === 404) pass("Intake: checkout refuses a submission id (404)");
+        else fail("Intake: checkout leak", `expected 404, got ${res.status}`);
+      } else {
+        skip("Intake: checkout refuses a submission id", "/api/checkout unavailable");
+      }
+    }
+
+    // ── Admin-only review ─────────────────────────────────────────
+    {
+      const res = await fetch(`${BASE_URL}/admin/submissions`, { redirect: "manual" });
+      if (res.status === 307 || res.status === 302) {
+        const loc = res.headers.get("location") || "";
+        if (loc.includes("/admin/login")) {
+          pass("Intake: the review queue requires an admin session");
+        } else {
+          fail("Intake: admin gate", `redirected to ${loc}`);
+        }
+      } else {
+        fail("Intake: admin gate", `expected a redirect, got ${res.status}`);
+      }
+    }
+
+    // ── Repeat drops: new id, new URL, previous row untouched ─────
+    {
+      const before = await supabase
+        .from("drop_items")
+        .select("*")
+        .eq("id", `test-intake-a-${stamp}`)
+        .single();
+
+      const args = {
+        restaurantName: "Intake Test Kitchen A",
+        title: "Repeat Night",
+        startTimeLocal: "2099-06-01T17:00",
+      };
+
+      const firstId = await generateUniqueDropId(args);
+      const firstDrop = await insertTestDrop({
+        id: firstId,
+        title: "Repeat Night",
+        restaurant_name: "Intake Test Kitchen A",
+        restaurant_id: restA.id,
+      });
+      dropIds.push(firstDrop.id);
+
+      // The SAME restaurant, dish and day again — the repeat case.
+      const secondId = await generateUniqueDropId(args);
+
+      if (secondId !== firstId) {
+        pass(`Intake: a repeat drop gets a NEW id (${firstId} → ${secondId})`);
+      } else {
+        fail("Intake: repeat drop id", `collision not resolved: ${secondId}`);
+      }
+      if (/-2$/.test(secondId)) {
+        pass("Intake: repeat ids resolve deterministically (base → base-2)");
+      } else {
+        fail("Intake: repeat drop suffix", `got ${secondId}`);
+      }
+
+      const secondDrop = await insertTestDrop({
+        id: secondId,
+        title: "Repeat Night",
+        restaurant_name: "Intake Test Kitchen A",
+        restaurant_id: restA.id,
+      });
+      dropIds.push(secondDrop.id);
+
+      // Immutability: publishing the repeat changed nothing on the first.
+      const after = await supabase
+        .from("drop_items")
+        .select("*")
+        .eq("id", `test-intake-a-${stamp}`)
+        .single();
+
+      if (!before.error && !after.error) {
+        const same = JSON.stringify(before.data) === JSON.stringify(after.data);
+        if (same) {
+          pass("Intake: publishing a repeat left the previous drop byte-identical");
+        } else {
+          fail("Intake: repeat immutability", "the earlier drop row changed");
+        }
+      } else {
+        fail("Intake: repeat immutability", "could not re-read the earlier drop");
+      }
+
+      // And the two repeats are genuinely distinct rows/URLs.
+      const { data: bothRows } = await supabase
+        .from("drop_items")
+        .select("id")
+        .in("id", [firstId, secondId]);
+      if ((bothRows ?? []).length === 2) {
+        pass("Intake: the repeat is a separate drop row with its own URL");
+      } else {
+        fail("Intake: repeat rows", `expected 2 rows, got ${(bothRows ?? []).length}`);
+      }
+    }
+  } catch (err) {
+    fail("Intake: suite", err.message);
+  } finally {
+    for (const id of submissionIds) {
+      await supabase.from("drop_submissions").delete().eq("id", id);
+    }
+    if (restA) await supabase.from("drop_submissions").delete().eq("restaurant_id", restA.id);
+    if (restB) await supabase.from("drop_submissions").delete().eq("restaurant_id", restB.id);
+    for (const id of dropIds) await deleteTestDrop(id);
+    if (restA) await supabase.from("restaurants").delete().eq("id", restA.id);
+    if (restB) await supabase.from("restaurants").delete().eq("id", restB.id);
+  }
+}
+
 async function main() {
   console.log("╔══════════════════════════════════════════════════╗");
   console.log("║     DealsPro Regression Test Suite               ║");
@@ -1445,6 +1940,7 @@ async function main() {
     await testConsentPreservation();
     await testNameOptionalCapture();
     await testSmartUrlRoute();
+    await testRestaurantIntake();
   } catch (err) {
     console.error("\n[FATAL] Test runner crashed:", err);
     failed++;

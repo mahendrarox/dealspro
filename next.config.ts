@@ -34,6 +34,18 @@ const nextConfig: NextConfig = {
         source: "/r/:slug",
         headers: [{ key: "Cache-Control", value: "no-store" }],
       },
+      {
+        // The intake URL carries a signed credential in its path and
+        // renders restaurant-specific content. Never let a CDN, a proxy,
+        // or a shared browser cache hold on to it, and keep it out of
+        // every index.
+        source: "/intake/:token",
+        headers: [
+          { key: "Cache-Control", value: "no-store, private" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
     ];
   },
 };

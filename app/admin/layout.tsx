@@ -50,6 +50,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <a href="/admin/restaurants" style={{ color: T.muted, textDecoration: "none", fontSize: 14 }}>
             Restaurants
           </a>
+          <a href="/admin/submissions" style={{ color: T.muted, textDecoration: "none", fontSize: 14 }}>
+            Submissions
+          </a>
           <a href="/admin/drops/new" style={{ color: T.muted, textDecoration: "none", fontSize: 14 }}>
             New
           </a>
