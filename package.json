@@ -7,12 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:regression": "node scripts/run-datetime-tests.js && node scripts/run-intake-tests.js && node scripts/run-regression.js",
+    "test:regression": "node scripts/run-datetime-tests.js && node scripts/run-intake-tests.js && node scripts/test-intake-db.js && node scripts/run-regression.js",
     "test:regression:only": "node scripts/test-regression.js",
     "test:datetime": "node scripts/run-datetime-tests.js",
     "seed:drops": "tsx scripts/seed-drops.ts",
     "verify:drops": "tsx scripts/verify-drops.ts",
-    "test:intake": "node scripts/run-intake-tests.js"
+    "test:intake": "node scripts/run-intake-tests.js",
+    "test:intake:db": "node scripts/test-intake-db.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",

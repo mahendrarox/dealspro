@@ -59,6 +59,18 @@ const {
   addMinutesToTime,
   addDaysToDate,
 } = require(path.resolve(__dirname, "../lib/intake/questions.ts"));
+const {
+  generateCode,
+  normalizeCode,
+  looksLikeCode,
+  hashCode,
+  linkStatus,
+  isLegacyTokenCutOff,
+  CODE_LENGTH,
+  CODE_ENTROPY_BYTES,
+  CODE_PREFIX_LENGTH,
+  INTAKE_LINK_TTL_DAYS,
+} = require(path.resolve(__dirname, "../lib/intake/links.ts"));
 const { toIso } = require(path.resolve(__dirname, "../app/admin/drops/form-utils.ts"));
 const { validatePickupWindow } = require(path.resolve(__dirname, "../lib/admin/pickup-window.ts"));
 
@@ -765,6 +777,170 @@ function testSubmitPayload() {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// 11. SHORT INTAKE LINK CODES
+// ═══════════════════════════════════════════════════════════════════════
+
+function testShortCodes() {
+  section("Short intake codes: 128-bit base64url, case sensitive");
+
+  // ── Entropy and encoding ─────────────────────────────────────────
+  const sample = Array.from({ length: 3000 }, () => generateCode());
+
+  check("Code: 16 random bytes = 128 bits of entropy", CODE_ENTROPY_BYTES === 16);
+  check(`Code: encodes to ${CODE_LENGTH} base64url characters`, CODE_LENGTH === 22);
+  check("Code: every draw is 22 characters", sample.every((c) => c.length === 22));
+  check(
+    "Code: only base64url characters (A-Z a-z 0-9 - _)",
+    sample.every((c) => /^[A-Za-z0-9_-]+$/.test(c)),
+  );
+  check("Code: unpadded (no '=')", sample.every((c) => !c.includes("=")));
+  check("Code: 3000 draws are all distinct", new Set(sample).size === 3000);
+
+  // Both cases must actually occur, or the alphabet is not what we think.
+  check(
+    "Code: uses upper AND lower case (case sensitivity is real)",
+    sample.some((c) => /[A-Z]/.test(c)) && sample.some((c) => /[a-z]/.test(c)),
+  );
+
+  // Uniformity, measured correctly.
+  //
+  // 22 base64url characters can hold 132 bits, but 16 bytes give 128, so
+  // the FINAL character carries only the 2 leftover bits and is always
+  // one of A/Q/g/w. That is base64 working as designed, not a weakness —
+  // the code still has exactly 128 bits. Measuring uniformity across all
+  // 22 positions would therefore "fail" on a correct implementation, so
+  // the first 21 positions are checked for uniformity and the tail is
+  // asserted separately as the documented property it is.
+  {
+    const counts = new Map();
+    for (const c of sample) for (const ch of c.slice(0, 21)) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+    const expected = (sample.length * 21) / 64;
+    const worst = Math.max(...[...counts.values()].map((v) => Math.abs(v - expected) / expected));
+    check(
+      "Code: first 21 characters are uniform over all 64 symbols",
+      counts.size === 64 && worst < 0.25,
+      `symbols=${counts.size} worst deviation=${(worst * 100).toFixed(1)}%`,
+    );
+
+    const tails = new Set(sample.map((c) => c[21]));
+    check(
+      "Code: the 22nd character carries the 2 leftover bits (A/Q/g/w)",
+      [...tails].every((t) => "AQgw".includes(t)) && tails.size === 4,
+      `tail symbols: ${[...tails].sort().join("")}`,
+    );
+    check(
+      "Code: total entropy is exactly 128 bits (21*6 + 2)",
+      21 * 6 + 2 === CODE_ENTROPY_BYTES * 8,
+    );
+  }
+
+  // ── Case sensitivity ─────────────────────────────────────────────
+  const code = generateCode();
+  const flipped = [...code]
+    .map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()))
+    .join("");
+
+  check("Case: a generated code validates", looksLikeCode(code));
+  check(
+    "Case: the case-flipped code hashes DIFFERENTLY",
+    code !== flipped && hashCode(flipped) !== hashCode(code),
+    "case folding would collapse distinct codes onto one hash",
+  );
+  check(
+    "Case: normalization does not lower-case",
+    normalizeCode(code) === code && normalizeCode(code) !== code.toLowerCase() ||
+      code === code.toLowerCase(),
+  );
+
+  // ── Normalization: whitespace only ───────────────────────────────
+  check("Normalize: identity on a clean code", normalizeCode(code) === code);
+  check("Normalize: surrounding whitespace stripped", normalizeCode(`  ${code}\n`) === code);
+  check(
+    "Normalize: internal whitespace from a line wrap stripped",
+    normalizeCode(`${code.slice(0, 10)} ${code.slice(10)}`) === code,
+  );
+  check(
+    "Normalize: '-' is PRESERVED (it is a base64url character, not a separator)",
+    normalizeCode("aaaa-bbbb") === "aaaa-bbbb",
+  );
+  check(
+    "Normalize: '_' is PRESERVED",
+    normalizeCode("aaaa_bbbb") === "aaaa_bbbb",
+  );
+
+  // ── Shape validation ─────────────────────────────────────────────
+  check("Shape: rejects a short code", looksLikeCode(code.slice(0, 20)) === false);
+  check("Shape: rejects a long code", looksLikeCode(code + "ab") === false);
+  check("Shape: rejects an empty string", looksLikeCode("") === false);
+  check("Shape: rejects null/undefined", looksLikeCode(undefined) === false);
+  check(
+    "Shape: rejects a character outside base64url",
+    looksLikeCode("!" + code.slice(1)) === false,
+  );
+  check(
+    "Shape: rejects base64 padding",
+    looksLikeCode(code.slice(0, 21) + "=") === false,
+  );
+  check(
+    "Shape: a legacy JWT is NOT mistaken for a short code",
+    looksLikeCode(
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEifQ.x",
+    ) === false,
+  );
+
+  // ── Hashing ──────────────────────────────────────────────────────
+  const hash = hashCode(code);
+  check("Hash: 64 hex characters (sha-256)", /^[0-9a-f]{64}$/.test(hash));
+  check("Hash: stable across surrounding whitespace", hashCode(` ${code} `) === hash);
+  check("Hash: different codes hash differently", hashCode(generateCode()) !== hash);
+  check("Hash: does not contain the code", !hash.includes(code));
+
+  // ── Prefix ───────────────────────────────────────────────────────
+  check(
+    `Prefix: ${CODE_PREFIX_LENGTH} of ${CODE_LENGTH} chars leaves the code unguessable`,
+    CODE_PREFIX_LENGTH === 6 && CODE_PREFIX_LENGTH < CODE_LENGTH / 3,
+  );
+
+  // ── Status derivation ────────────────────────────────────────────
+  const hour = 3600_000;
+  const base = {
+    id: "x", restaurant_id: "r", code_hash: "h", code_prefix: "abcdef",
+    created_by: "op@dealspro.ai", created_at: new Date().toISOString(),
+    replaced_by: null, revoked_by: null, revoke_reason: null,
+    last_used_at: null, use_count: 0,
+  };
+  check("Status: a fresh link is active",
+    linkStatus({ ...base, expires_at: new Date(Date.now() + hour).toISOString(), revoked_at: null }) === "active");
+  check("Status: a past expiry is expired",
+    linkStatus({ ...base, expires_at: new Date(Date.now() - hour).toISOString(), revoked_at: null }) === "expired");
+  check("Status: revocation beats a valid expiry",
+    linkStatus({ ...base, expires_at: new Date(Date.now() + hour).toISOString(), revoked_at: new Date().toISOString() }) === "revoked");
+  check("Status: default TTL is still 14 days", INTAKE_LINK_TTL_DAYS === 14);
+
+  // ── Legacy JWT cutoff ────────────────────────────────────────────
+  section("Legacy JWT cutoff: Revoke all / Replace must mean ALL");
+
+  const now = new Date();
+  const earlier = new Date(now.getTime() - hour);
+  const later = new Date(now.getTime() + hour);
+
+  check("Cutoff: with no cutoff set, a legacy token is untouched",
+    isLegacyTokenCutOff(earlier, null) === false);
+  check("Cutoff: a token issued BEFORE the cutoff is revoked",
+    isLegacyTokenCutOff(earlier, now) === true);
+  check("Cutoff: a token issued AT the cutoff is revoked (inclusive)",
+    isLegacyTokenCutOff(now, now) === true);
+  check("Cutoff: a token issued AFTER the cutoff still works",
+    isLegacyTokenCutOff(later, now) === false);
+  check("Cutoff: an undateable token is revoked once any cutoff exists",
+    isLegacyTokenCutOff(null, now) === true,
+    "we cannot prove it predates the revocation, so it must not be trusted");
+  check("Cutoff: an undateable token with no cutoff is untouched",
+    isLegacyTokenCutOff(null, null) === false);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // 10. CODEBASE INVARIANTS
 // ═══════════════════════════════════════════════════════════════════════
@@ -937,6 +1113,71 @@ function testCodebaseInvariants() {
     (providerSrc.match(/input_schema:/g) || []).length === 1,
   );
 
+
+  // ── Short-link containment ───────────────────────────────────────
+  // Matched on actual table ACCESS, not prose: several modules discuss
+  // intake_links in comments, which is the point of the comments.
+  const linkRefs = files
+    .filter((f) => /from\(\s*["']intake_links["']\s*\)/.test(read(f)))
+    .map(rel)
+    .filter((f) => f !== "lib/intake/links.ts");
+  check(
+    "Short links: only lib/intake/links.ts queries intake_links",
+    linkRefs.length === 0,
+    `also queried by: ${linkRefs.join(", ")}`,
+  );
+
+  // The plaintext code must be hashed on the way in and never persisted.
+  const linksSrc = read(path.resolve(__dirname, "../lib/intake/links.ts"));
+  check(
+    "Short links: createLink stores code_hash, never the code",
+    /code_hash:\s*hashCode\(code\)/.test(linksSrc) &&
+      !/\bcode:\s*code\b/.test(linksSrc) &&
+      !/insert\(\{[^}]*\bcode\b\s*:/.test(linksSrc),
+  );
+  check(
+    "Short links: only the prefix is stored in the clear",
+    /code_prefix:\s*code\.slice\(0, CODE_PREFIX_LENGTH\)/.test(linksSrc),
+  );
+
+  // A log line containing the code would be a log line that grants access.
+  const adminSrc = read(path.resolve(__dirname, "../lib/intake/admin-actions.ts"));
+  check(
+    "Short links: the admin audit payload carries the link id, not the code",
+    /intake_link_id:/.test(adminSrc) && !/code:\s*created\.code/.test(adminSrc),
+  );
+  const codeLogged = files.filter((f) => {
+    const src = read(f);
+    return /console\.(log|error|warn|info)\([^)]*\bcode\b[^)]*\)/.test(src) &&
+      rel(f).startsWith("lib/intake/");
+  }).map(rel);
+  check(
+    "Short links: no intake module logs a code",
+    codeLogged.length === 0,
+    `logs a code: ${codeLogged.join(", ")}`,
+  );
+
+  // Every credential entry point goes through the one resolver.
+  for (const p2 of ["app/i/[code]/page.tsx", "app/intake/[token]/page.tsx"]) {
+    const full = path.resolve(__dirname, "..", p2);
+    check(
+      `Short links: ${p2} resolves through resolveIntakeCredential`,
+      fs.existsSync(full) && /resolveIntakeCredential\(/.test(read(full)),
+    );
+  }
+
+  // Revocation and expiry are re-read per request, not cached in a token.
+  const sessionSrc = read(path.resolve(__dirname, "../lib/intake/session.ts"));
+  check(
+    "Short links: the resolver re-checks revocation and expiry every call",
+    /resolveCode\(/.test(sessionSrc) && /reason === "revoked"/.test(sessionSrc) &&
+      /reason === "expired"/.test(sessionSrc),
+  );
+  check(
+    "Short links: legacy JWT acceptance is explicitly switchable",
+    /INTAKE_ALLOW_LEGACY_JWT/.test(sessionSrc) && /legacy_disabled/.test(sessionSrc),
+  );
+
   // ── Scope exclusions ─────────────────────────────────────────────
   // The MVP must not have grown SMS/Stripe/QR/redemption tentacles.
   // Matched on import specifiers only. provider.ts names Stripe in its
@@ -975,6 +1216,7 @@ async function main() {
     testTimezone();
     testPickupWindow();
     testSubmitPayload();
+    testShortCodes();
     testCodebaseInvariants();
   } catch (err) {
     console.error("\n[FATAL] intake suite crashed:", err);

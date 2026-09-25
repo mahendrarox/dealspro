@@ -2,7 +2,8 @@
 
 import { dropCreateSchema } from "@/lib/admin/schemas";
 import { toIso } from "@/app/admin/drops/form-utils";
-import { resolveIntakeLink } from "./session";
+import { resolveIntakeCredential, type IntakeLinkFailure } from "./session";
+import { countSubmission } from "./links";
 import { verifyUploadReceipt } from "./token";
 import { extractDropFields, todayCentral } from "./extract";
 import { submitPayloadSchema, type ExtractedDraft, type RequiredDraftField } from "./schemas";
@@ -18,7 +19,7 @@ import { insertSubmission } from "./db";
  * Server actions reachable from the restaurant's intake page.
  *
  * Three rules hold across every action in this file:
- *   1. The restaurant id comes from `resolveIntakeLink(token)` and from
+ *   1. The restaurant id comes from `resolveIntakeCredential()` and from
  *      nowhere else. Nothing the browser sends can widen its scope.
  *   2. The LLM is only ever reached through `extractDropFields`, which
  *      returns a plain validated object. No action here lets a model
@@ -53,10 +54,10 @@ export type InterpretResult =
  * every question instead. Failing closed means asking, never assuming.
  */
 export async function interpretMessage(
-  token: string,
+  credential: string,
   message: string,
 ): Promise<InterpretResult> {
-  const link = await resolveIntakeLink(token);
+  const link = await resolveIntakeCredential(credential);
   if (!link.ok) return { ok: false, error: linkError(link.reason) };
 
   const trimmed = (message ?? "").trim();
@@ -102,8 +103,8 @@ export type LastPhotoResult = { ok: true; photo: LastPhoto | null } | { ok: fals
  * Scoped by the token's restaurant id — this is the only way the reuse
  * option can ever be populated.
  */
-export async function getReusablePhoto(token: string): Promise<LastPhotoResult> {
-  const link = await resolveIntakeLink(token);
+export async function getReusablePhoto(credential: string): Promise<LastPhotoResult> {
+  const link = await resolveIntakeCredential(credential);
   if (!link.ok) return { ok: false, error: linkError(link.reason) };
   const photo = await getLastPublishedPhoto(link.restaurant.id);
   return { ok: true, photo };
@@ -120,10 +121,10 @@ export type SubmitResult =
  * not touch `drop_items`, and does not make the drop visible anywhere.
  */
 export async function submitDropForReview(
-  token: string,
+  credential: string,
   payload: unknown,
 ): Promise<SubmitResult> {
-  const link = await resolveIntakeLink(token);
+  const link = await resolveIntakeCredential(credential);
   if (!link.ok) return { ok: false, error: linkError(link.reason) };
 
   const parsed = submitPayloadSchema.safeParse(payload);
@@ -209,13 +210,23 @@ export async function submitDropForReview(
     image_source: input.image_source,
     image_provenance: provenance,
     idempotency_key: input.idempotency_key,
-    intake_token_jti: link.claims.jti,
-    intake_token_issued_at: link.claims.issuedAt?.toISOString() ?? null,
-    intake_token_expires_at: link.claims.expiresAt?.toISOString() ?? null,
+    // "which link produced this". For a short code that is the
+    // intake_links row id; for a legacy JWT it is the token's jti.
+    intake_token_jti: link.linkId,
+    intake_token_issued_at: link.issuedAt?.toISOString() ?? null,
+    intake_token_expires_at: link.expiresAt?.toISOString() ?? null,
     intake_session_id: input.intake_session_id,
   });
 
   if (!inserted.ok) return { ok: false, error: inserted.error };
+
+  // Count a real submission against the short link that produced it, so
+  // an operator can see a link is being used. Only on a genuinely new
+  // row — a duplicate is the same submission arriving twice, not a
+  // second use. Bookkeeping: never allowed to fail the submission.
+  if (link.kind === "short_code" && link.link && !inserted.duplicate) {
+    void countSubmission(link.link.id, link.link.use_count);
+  }
 
   return {
     ok: true,
@@ -225,12 +236,16 @@ export async function submitDropForReview(
 }
 
 // Not exported: a "use server" module may only export async functions.
-function linkError(reason: "invalid" | "inactive" | "unconfigured"): string {
+function linkError(reason: IntakeLinkFailure): string {
   if (reason === "inactive") {
     return "This restaurant is not currently active on DealsPro. Please contact us.";
   }
   if (reason === "unconfigured") {
     return "Restaurant intake is not configured yet. Please contact DealsPro.";
   }
+  // "invalid", "expired", "revoked" and "legacy_disabled" all collapse to
+  // one message on purpose: telling a visitor which of those applies
+  // would confirm to someone probing codes that they had found a real
+  // link. Studio shows operators the real state.
   return "This link is no longer valid. Please ask DealsPro for a new one.";
 }

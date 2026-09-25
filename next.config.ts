@@ -35,10 +35,22 @@ const nextConfig: NextConfig = {
         headers: [{ key: "Cache-Control", value: "no-store" }],
       },
       {
-        // The intake URL carries a signed credential in its path and
+        // The short intake URL carries a credential in its path and
         // renders restaurant-specific content. Never let a CDN, a proxy,
         // or a shared browser cache hold on to it, and keep it out of
-        // every index.
+        // every index. `no-referrer` matters more here than usual: the
+        // code is the whole credential, so it must not leak through a
+        // Referer header if the page ever links out.
+        source: "/i/:code",
+        headers: [
+          { key: "Cache-Control", value: "no-store, private" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+      {
+        // Same protection for the legacy JWT route, which stays alive
+        // until the last outstanding link expires.
         source: "/intake/:token",
         headers: [
           { key: "Cache-Control", value: "no-store, private" },

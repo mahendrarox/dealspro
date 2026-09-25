@@ -10,7 +10,7 @@ import {
   isAcceptedMime,
   normalizeImage,
 } from "@/lib/admin/images";
-import { resolveIntakeLink } from "@/lib/intake/session";
+import { resolveIntakeCredential } from "@/lib/intake/session";
 import { signUploadReceipt } from "@/lib/intake/token";
 import { INTAKE_BUCKET, intakeStoragePrefix, readImageProvenance } from "@/lib/intake/images";
 
@@ -51,8 +51,10 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Auth: the link is the credential ──────────────────────────────
+  // Named "token" for wire compatibility with the client; it now carries
+  // either a short code or a legacy JWT, and the resolver tells them apart.
   const token = form.get("token");
-  const link = await resolveIntakeLink(typeof token === "string" ? token : null);
+  const link = await resolveIntakeCredential(typeof token === "string" ? token : null);
   if (!link.ok) {
     const status = link.reason === "unconfigured" ? 500 : 401;
     return NextResponse.json({ error: "This link is no longer valid" }, { status });

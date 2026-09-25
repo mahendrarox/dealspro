@@ -13,6 +13,8 @@ export type AdminAction =
   // minted link and the published drop id for a publish, matching how
   // each action is looked up later.
   | "create_intake_link"
+  | "replace_intake_link"
+  | "revoke_intake_link"
   | "publish_submission"
   | "reject_submission";
 
