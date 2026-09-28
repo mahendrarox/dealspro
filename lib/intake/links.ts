@@ -131,6 +131,11 @@ export function isMissingLinksTable(
   error: { code?: string; message?: string } | null,
 ): boolean {
   if (!error) return false;
+  // 42703 is undefined_column. A missing COLUMN names the table in its
+  // message just as a missing table does, so without this guard the
+  // message regex below claims it, and the operator is told to apply
+  // migration-010 when what they are missing is migration-011.
+  if (error.code === "42703") return false;
   return (
     error.code === "42P01" ||
     /intake_links|intake_legacy_cutoffs/i.test(error.message ?? "") ||
@@ -140,6 +145,59 @@ export function isMissingLinksTable(
 
 export const LINKS_MIGRATION_REQUIRED =
   "Short intake links are not available yet — apply migration-010-intake-links.sql.";
+
+export const CIPHER_MIGRATION_REQUIRED =
+  "Retrievable links are not available yet — apply migration-011-intake-link-ciphertext.sql.";
+
+export const ENC_KEY_REQUIRED =
+  "Link encryption is not configured on this server — set INTAKE_LINK_ENC_KEY.";
+
+export type StorageReadiness =
+  | { ok: true }
+  | { ok: false; reason: "links_table" | "cipher_columns" | "enc_key"; error: string };
+
+/**
+ * Can we store a link such that it will be retrievable later?
+ *
+ * This is a PREFLIGHT, and it exists because of `replaceIntakeLink`.
+ * Replace revokes every credential a partner holds and then mints a new
+ * one. If the mint cannot produce a retrievable link, the operator ends
+ * up worse off than before they clicked: every old link dead, and the new
+ * one un-copyable — so the very next thing they reach for is Replace
+ * again. Checking first turns that into a refusal that changes nothing.
+ *
+ * The table and column probes are real queries rather than a cached flag,
+ * because "unknown" is the state this has to resolve. One indexed read of
+ * at most one row, on an operator action that happens a few times a day.
+ */
+export async function checkLinkStorageReady(): Promise<StorageReadiness> {
+  if (!isLinkCryptoConfigured()) {
+    return { ok: false, reason: "enc_key", error: ENC_KEY_REQUIRED };
+  }
+
+  const { error } = await adminDb
+    .from("intake_links")
+    .select(LINK_CIPHER_COLS)
+    .limit(1);
+
+  if (error) {
+    // Column check FIRST: the two errors are easy to confuse and sending
+    // an operator to the wrong migration wastes a production change.
+    if (noteMissingCipherColumns(error)) {
+      return { ok: false, reason: "cipher_columns", error: CIPHER_MIGRATION_REQUIRED };
+    }
+    if (isMissingLinksTable(error)) {
+      return { ok: false, reason: "links_table", error: LINKS_MIGRATION_REQUIRED };
+    }
+    // Anything else — a dropped connection, a permissions change — is not
+    // something we can call ready either.
+    console.error("[intake/links] storage readiness probe failed:", error.message);
+    return { ok: false, reason: "cipher_columns", error: CIPHER_MIGRATION_REQUIRED };
+  }
+
+  cipherColumnsPresent = true;
+  return { ok: true };
+}
 
 export function generateCode(bytes: number = CODE_ENTROPY_BYTES): string {
   return crypto.randomBytes(bytes).toString("base64url");
@@ -185,10 +243,15 @@ export type CreateLinkResult =
  * because the ciphertext's AAD is bound to it — we have to know the id
  * before we can encrypt.
  *
- * Encryption is best-effort by design: with no key configured the link is
- * still minted, hash-only, exactly as it would have been before this
- * feature existed. Refusing to mint would take away a working capability
- * in order to protect a convenience.
+ * FAILS CLOSED. If the code cannot be stored retrievably — no key, or
+ * migration-011 not applied — this refuses rather than quietly minting a
+ * hash-only link. An earlier draft degraded instead, on the reasoning
+ * that a working link beats no link. That reasoning is wrong for the
+ * caller that matters: `replaceIntakeLink` has already revoked every
+ * credential the partner holds by the time it gets here, so a silent
+ * downgrade leaves the operator with nothing they can send and no way
+ * back. The callers preflight with `checkLinkStorageReady()`; this is the
+ * backstop for the gap between that check and this write.
  */
 export async function createLink(opts: {
   restaurantId: string;
@@ -197,7 +260,10 @@ export async function createLink(opts: {
 }): Promise<CreateLinkResult> {
   const ttlDays = opts.ttlDays ?? INTAKE_LINK_TTL_DAYS;
   const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
-  const canEncrypt = isLinkCryptoConfigured();
+
+  if (!isLinkCryptoConfigured()) {
+    return { ok: false, error: ENC_KEY_REQUIRED };
+  }
 
   // A collision at 128 bits is not a real event, but the unique index
   // makes it a hard error rather than a silent overwrite, so retry.
@@ -215,39 +281,36 @@ export async function createLink(opts: {
       created_by: opts.createdBy,
     };
 
-    let cipher: { code_encrypted: string; code_enc_version: number } | null = null;
-    if (canEncrypt && cipherColumnsPresent !== false) {
-      try {
-        cipher = {
-          code_encrypted: encryptCode(code, {
-            id,
-            restaurantId: opts.restaurantId,
-            codeHash,
-          }),
-          code_enc_version: ENVELOPE_VERSION,
-        };
-      } catch (err) {
-        // A misconfigured key must not cost the operator their link.
-        console.error(
-          "[intake/links] encryption unavailable, storing hash only:",
-          err instanceof Error ? err.message : "unknown error",
-        );
-      }
+    let cipher: { code_encrypted: string; code_enc_version: number };
+    try {
+      cipher = {
+        code_encrypted: encryptCode(code, {
+          id,
+          restaurantId: opts.restaurantId,
+          codeHash,
+        }),
+        code_enc_version: ENVELOPE_VERSION,
+      };
+    } catch (err) {
+      // The key was readable a moment ago and is not now. Refuse: see the
+      // note above about what a silent downgrade does to Replace.
+      console.error(
+        "[intake/links] encryption failed, refusing to mint:",
+        err instanceof Error ? err.message : "unknown error",
+      );
+      return { ok: false, error: ENC_KEY_REQUIRED };
     }
 
-    let { data, error } = await adminDb
+    const { data, error } = await adminDb
       .from("intake_links")
-      .insert(cipher ? { ...base, ...cipher } : base)
+      .insert({ ...base, ...cipher })
       .select(selectCols())
       .single();
 
-    // migration-011 not applied yet → retry without the new columns.
+    // migration-011 not applied — do NOT fall back to a hash-only insert.
+    // A link nobody can copy is the state this whole change exists to end.
     if (error && noteMissingCipherColumns(error)) {
-      ({ data, error } = await adminDb
-        .from("intake_links")
-        .insert(base)
-        .select(LINK_BASE_COLS)
-        .single());
+      return { ok: false, error: CIPHER_MIGRATION_REQUIRED, migrationMissing: true };
     }
 
     if (!error && data) {

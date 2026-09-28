@@ -68,6 +68,11 @@ const {
   hashCode,
   linkStatus,
   canRevealLink,
+  createLink,
+  checkLinkStorageReady,
+  ENC_KEY_REQUIRED,
+  CIPHER_MIGRATION_REQUIRED,
+  isMissingLinksTable,
   isLegacyTokenCutOff,
   CODE_LENGTH,
   CODE_ENTROPY_BYTES,
@@ -1153,6 +1158,76 @@ function testLinkCrypto() {
   );
 }
 
+/**
+ * Minting must REFUSE when the code could not be stored retrievably.
+ *
+ * Runs without a database on purpose: with no key, createLink returns
+ * before it touches the client at all, and that ordering is the property
+ * under test. If it ever reached the insert, this suite would hang or
+ * throw rather than pass.
+ */
+async function testFailsClosed() {
+  section("Fail closed: no key, no mint");
+
+  const restore = process.env[ENC_KEY_ENV];
+  try {
+    delete process.env[ENC_KEY_ENV];
+
+    const created = await createLink({
+      restaurantId: RESTAURANT_A,
+      createdBy: "op@dealspro.ai",
+    });
+    check("Mint: createLink refuses with no encryption key", created.ok === false);
+    check(
+      "Mint: the refusal names the missing secret",
+      created.ok === false && created.error === ENC_KEY_REQUIRED,
+      created.ok ? "minted anyway" : created.error,
+    );
+    check(
+      "Mint: the refusal does not leak a code",
+      created.ok === false && !("code" in created),
+    );
+
+    const ready = await checkLinkStorageReady();
+    check(
+      "Preflight: the readiness probe fails on the key before querying",
+      ready.ok === false && ready.reason === "enc_key",
+      ready.ok ? "reported ready" : ready.reason,
+    );
+  } finally {
+    process.env[ENC_KEY_ENV] = restore;
+  }
+
+  check(
+    "Preflight: the two blocking messages name their own remedy",
+    /INTAKE_LINK_ENC_KEY/.test(ENC_KEY_REQUIRED) &&
+      /migration-011/.test(CIPHER_MIGRATION_REQUIRED),
+  );
+
+  // A missing COLUMN must never be reported as a missing TABLE. Both
+  // errors name intake_links in their message, so the only thing telling
+  // them apart is the SQLSTATE — and getting it wrong sends an operator
+  // to apply the wrong migration against production.
+  check(
+    "Preflight: a 42703 undefined_column is NOT read as a missing table",
+    isMissingLinksTable({
+      code: "42703",
+      message: 'column intake_links.code_encrypted does not exist',
+    }) === false,
+  );
+  check(
+    "Preflight: a 42P01 undefined_table still is",
+    isMissingLinksTable({
+      code: "42P01",
+      message: 'relation "public.intake_links" does not exist',
+    }) === true,
+  );
+  check(
+    "Preflight: a bare message naming the table still counts as missing",
+    isMissingLinksTable({ message: "could not find the table intake_links" }) === true,
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // 11. CODEBASE INVARIANTS
 // ═══════════════════════════════════════════════════════════════════════
@@ -1438,6 +1513,53 @@ function testCodebaseInvariants() {
     })(),
   );
 
+  // Replace revokes before it mints. The readiness check therefore has to
+  // come FIRST in source order, or a missing key leaves the partner with
+  // every link dead and nothing to replace them.
+  {
+    const replaceStart = adminSrc.indexOf("export async function replaceIntakeLink");
+    const replaceEnd = adminSrc.indexOf("\nexport ", replaceStart + 10);
+    const replaceFn = adminSrc.slice(replaceStart, replaceEnd === -1 ? undefined : replaceEnd);
+    const readyAt = replaceFn.indexOf("assertLinkStorageReady()");
+    const revokeAt = replaceFn.indexOf("revokeAllForRestaurant({");
+    const cutoffAt = replaceFn.indexOf("setLegacyCutoff({");
+    check(
+      "Preflight: replaceIntakeLink checks storage readiness",
+      readyAt !== -1,
+    );
+    check(
+      "Preflight: the readiness check precedes the revoke",
+      readyAt !== -1 && revokeAt !== -1 && readyAt < revokeAt,
+      `ready@${readyAt} revoke@${revokeAt}`,
+    );
+    check(
+      "Preflight: the readiness check precedes the legacy cutoff",
+      readyAt !== -1 && cutoffAt !== -1 && readyAt < cutoffAt,
+      `ready@${readyAt} cutoff@${cutoffAt}`,
+    );
+    check(
+      "Preflight: a blocked Replace says nothing was revoked",
+      /Nothing was revoked/.test(replaceFn),
+    );
+
+    const createFn = adminSrc.slice(
+      adminSrc.indexOf("export async function createIntakeLink"),
+      adminSrc.indexOf("export async function replaceIntakeLink"),
+    );
+    check(
+      "Preflight: createIntakeLink checks storage readiness before minting",
+      createFn.indexOf("assertLinkStorageReady()") !== -1 &&
+        createFn.indexOf("assertLinkStorageReady()") < createFn.indexOf("createLink({"),
+    );
+  }
+
+  // Minting must not silently downgrade to a hash-only row.
+  check(
+    "Preflight: createLink has no hash-only fallback insert",
+    !/insert\(base\)/.test(linksSrc) &&
+      /return \{ ok: false, error: CIPHER_MIGRATION_REQUIRED/.test(linksSrc),
+  );
+
   // The ciphertext is server-only state. Nothing in the browser bundle
   // may name the column or the key, and no client component may import
   // the crypto module.
@@ -1565,6 +1687,7 @@ async function main() {
     testSubmitPayload();
     testShortCodes();
     testLinkCrypto();
+    await testFailsClosed();
     testCodebaseInvariants();
   } catch (err) {
     console.error("\n[FATAL] intake suite crashed:", err);

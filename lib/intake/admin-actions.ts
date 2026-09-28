@@ -6,6 +6,7 @@ import { logAdminAction } from "@/lib/admin/log";
 import { adminDb } from "@/lib/supabase-admin";
 import {
   canRevealLink,
+  checkLinkStorageReady,
   createLink,
   listLinksForRestaurant,
   linkStatus,
@@ -17,7 +18,6 @@ import {
   INTAKE_LINK_TTL_DAYS,
   type LinkStatus,
 } from "./links";
-import { isLinkCryptoConfigured } from "./link-crypto";
 import { markSubmissionPublished, markSubmissionRejected } from "./db";
 
 /**
@@ -47,6 +47,22 @@ export type LinkResult = { ok: true; link: MintedLink } | { ok: false; error: st
 
 function appBase(): string {
   return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ?? "";
+}
+
+/**
+ * Refuse before touching anything if a minted link could not be stored
+ * retrievably.
+ *
+ * Ordering is the entire point for Replace: it revokes every credential a
+ * partner holds and then mints a replacement. Discovering the key or the
+ * migration is missing AFTER the revoke leaves the operator with all the
+ * old links dead and a new one they cannot copy — strictly worse than not
+ * having clicked. So both Create and Replace run this first, and a
+ * failure changes no row.
+ */
+async function assertLinkStorageReady(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ready = await checkLinkStorageReady();
+  return ready.ok ? { ok: true } : { ok: false, error: ready.error };
 }
 
 async function assertActiveRestaurant(
@@ -83,6 +99,9 @@ export async function createIntakeLink(restaurantId: string): Promise<LinkResult
 
   const restaurant = await assertActiveRestaurant(restaurantId);
   if (!restaurant.ok) return { ok: false, error: restaurant.error };
+
+  const ready = await assertLinkStorageReady();
+  if (!ready.ok) return { ok: false, error: ready.error };
 
   const created = await createLink({ restaurantId, createdBy: admin.email });
   if (!created.ok) return { ok: false, error: created.error };
@@ -126,6 +145,15 @@ export async function replaceIntakeLink(restaurantId: string): Promise<LinkResul
 
   const restaurant = await assertActiveRestaurant(restaurantId);
   if (!restaurant.ok) return { ok: false, error: restaurant.error };
+
+  // BEFORE the revoke. Nothing below this line is reversible.
+  const ready = await assertLinkStorageReady();
+  if (!ready.ok) {
+    return {
+      ok: false,
+      error: `${ready.error} Nothing was revoked — the existing links are still valid.`,
+    };
+  }
 
   const { rows: before } = await listLinksForRestaurant(restaurantId);
   const liveIds = before.filter((l) => linkStatus(l) === "active").map((l) => l.id);
@@ -266,8 +294,14 @@ export type ListLinksResult =
       ok: true;
       links: LinkSummary[];
       migrationMissing: boolean;
-      /** False when INTAKE_LINK_ENC_KEY is unset, so Studio can say why. */
-      cryptoConfigured: boolean;
+      /**
+       * Whether a NEW link could be minted retrievably right now. False
+       * means Create and Replace will refuse, so Studio disables them and
+       * shows `storageError` instead of letting an operator click into a
+       * refusal.
+       */
+      storageReady: boolean;
+      storageError: string | null;
     }
   | { ok: false; error: string };
 
@@ -285,12 +319,13 @@ export async function listIntakeLinks(restaurantId: string): Promise<ListLinksRe
   }
 
   const { rows, migrationMissing } = await listLinksForRestaurant(restaurantId);
-  const cryptoConfigured = isLinkCryptoConfigured();
+  const ready = await checkLinkStorageReady();
 
   return {
     ok: true,
     migrationMissing,
-    cryptoConfigured,
+    storageReady: ready.ok,
+    storageError: ready.ok ? null : ready.error,
     links: rows.map((l) => {
       const status = linkStatus(l);
       return {

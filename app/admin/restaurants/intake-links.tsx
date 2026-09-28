@@ -108,7 +108,8 @@ export default function IntakeLinks({
   const [open, setOpen] = useState(false);
   const [links, setLinks] = useState<LinkSummary[]>([]);
   const [migrationMissing, setMigrationMissing] = useState(false);
-  const [cryptoConfigured, setCryptoConfigured] = useState(true);
+  const [storageReady, setStorageReady] = useState(true);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [minted, setMinted] = useState<MintedLink | null>(null);
   const [copied, setCopied] = useState(false);
@@ -140,7 +141,8 @@ export default function IntakeLinks({
       }
       setLinks(res.links);
       setMigrationMissing(res.migrationMissing);
-      setCryptoConfigured(res.cryptoConfigured);
+      setStorageReady(res.storageReady);
+      setStorageError(res.storageError);
       setLoaded(true);
     });
   }, [restaurantId]);
@@ -327,11 +329,12 @@ export default function IntakeLinks({
         </div>
       )}
 
-      {!migrationMissing && !cryptoConfigured && loaded && (
+      {!migrationMissing && !storageReady && loaded && (
         <div style={{ fontSize: 12, color: T.amber, marginBottom: 10, lineHeight: 1.5 }}>
-          <strong>Copying is switched off.</strong> <code>INTAKE_LINK_ENC_KEY</code> is not set on
-          this server, so new links cannot be stored for later retrieval. Links still work —
-          they just have to be saved when they are created.
+          <strong>New links are blocked.</strong> {storageError} Create and Replace are disabled
+          until that is fixed — deliberately, so Replace cannot revoke the links{" "}
+          {restaurantName} is using and then fail to issue a usable one. Existing links keep
+          working.
         </div>
       )}
 
@@ -385,7 +388,7 @@ export default function IntakeLinks({
           }}
         >
           <div style={{ fontSize: 11, color: T.amber, fontWeight: 700, marginBottom: 6, lineHeight: 1.5 }}>
-            {cryptoConfigured
+            {storageReady
               ? `New link for ${restaurantName}. Anyone holding it can submit drops for this restaurant. Expires ${fmt(minted.expiresAt)} CT — you can copy it again later from the list below.`
               : `COPY THIS NOW — it is shown once and cannot be retrieved later. Anyone holding it can submit drops for ${restaurantName}. Expires ${fmt(minted.expiresAt)} CT.`}
           </div>
@@ -431,7 +434,7 @@ export default function IntakeLinks({
         <button
           type="button"
           onClick={onCreate}
-          disabled={pending || migrationMissing}
+          disabled={pending || migrationMissing || !storageReady}
           style={btn(T.text)}
         >
           {activeCount === 0 ? "Create link" : "Create another"}
@@ -441,7 +444,7 @@ export default function IntakeLinks({
           <button
             type="button"
             onClick={() => setConfirmReplace(true)}
-            disabled={pending || migrationMissing}
+            disabled={pending || migrationMissing || !storageReady}
             style={btn(T.amber)}
           >
             Replace…
@@ -569,7 +572,7 @@ export default function IntakeLinks({
                     <button
                       type="button"
                       onClick={() => setConfirmRowReplace(l.id)}
-                      disabled={pending}
+                      disabled={pending || !storageReady}
                       style={{ ...rowBtn(T.amber), marginTop: 6 }}
                     >
                       Replace this link…

@@ -31,17 +31,23 @@
 -- revocation. Studio labels them and offers a one-time Replace, behind an
 -- explicit confirmation. Nothing is replaced automatically.
 --
--- FORWARD COMPATIBILITY. The application tolerates these columns being
--- absent (it retries its SELECT without them), so the code may be
--- deployed before or after this migration.
+-- FORWARD COMPATIBILITY. READS tolerate these columns being absent: the
+-- application retries its SELECT without them, so existing links keep
+-- resolving if the code is deployed before this migration is applied.
+-- MINTING does not — Create and Replace refuse while the columns or the
+-- key are missing, and say so, rather than issuing a link nobody can
+-- copy. Replace in particular checks BEFORE it revokes anything, so a
+-- refusal leaves the partner's current links untouched.
 --
 -- DEPLOY ORDER:
 --   1. Set INTAKE_LINK_ENC_KEY in the server environment
 --      (32 random bytes, base64 — see below). Never commit it.
 --   2. Apply THIS migration.
 --   3. Deploy the code.
---   Links minted before step 1 or 2 stay hash-only and copyable only
---   after a deliberate Replace.
+--   Between steps, existing links go on working and new ones are
+--   refused with a message naming the missing piece. Links minted
+--   before this release stay hash-only and become copyable only after a
+--   deliberate Replace.
 --
 --   Generate the key with:
 --     node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
