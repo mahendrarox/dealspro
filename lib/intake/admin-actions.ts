@@ -1,20 +1,23 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, unstable_noStore as noStore } from "next/cache";
 import { requireAdmin } from "@/lib/admin/auth";
 import { logAdminAction } from "@/lib/admin/log";
 import { adminDb } from "@/lib/supabase-admin";
 import {
+  canRevealLink,
   createLink,
   listLinksForRestaurant,
   linkStatus,
   markReplacedBy,
+  revealLinkCode,
   revokeAllForRestaurant,
   revokeLink,
   setLegacyCutoff,
   INTAKE_LINK_TTL_DAYS,
   type LinkStatus,
 } from "./links";
+import { isLinkCryptoConfigured } from "./link-crypto";
 import { markSubmissionPublished, markSubmissionRejected } from "./db";
 
 /**
@@ -28,12 +31,17 @@ import { markSubmissionPublished, markSubmissionRejected } from "./db";
  */
 
 export type MintedLink = {
-  /** Full URL. Shown ONCE — it is not recoverable afterwards. */
+  /** Full URL. */
   url: string;
   /** First few characters, safe to display later to identify the link. */
   prefix: string;
   expiresAt: string;
 };
+
+/** Build the shareable URL. The only place the two halves are joined. */
+function linkUrl(code: string): string {
+  return `${appBase()}/i/${code}`;
+}
 
 export type LinkResult = { ok: true; link: MintedLink } | { ok: false; error: string };
 
@@ -60,9 +68,10 @@ async function assertActiveRestaurant(
 /**
  * Mint a short private intake link.
  *
- * The plaintext code is returned exactly once and never stored — only
- * its SHA-256 is. That is why there is a "Replace" action and no
- * "show me that link again": a lost link is reissued, not recovered.
+ * The code is returned here AND stored encrypted, so an admin can copy
+ * the same URL again later via `revealIntakeLink`. Only the SHA-256 is
+ * used for validation. With no encryption key configured the link is
+ * still minted, hash-only, and can only be re-shared by replacing it.
  */
 export async function createIntakeLink(restaurantId: string): Promise<LinkResult> {
   let admin: { email: string };
@@ -93,7 +102,7 @@ export async function createIntakeLink(restaurantId: string): Promise<LinkResult
   return {
     ok: true,
     link: {
-      url: `${appBase()}/i/${created.code}`,
+      url: linkUrl(created.code),
       prefix: created.link.code_prefix,
       expiresAt: created.link.expires_at,
     },
@@ -156,7 +165,7 @@ export async function replaceIntakeLink(restaurantId: string): Promise<LinkResul
   return {
     ok: true,
     link: {
-      url: `${appBase()}/i/${created.code}`,
+      url: linkUrl(created.code),
       prefix: created.link.code_prefix,
       expiresAt: created.link.expires_at,
     },
@@ -237,10 +246,29 @@ export type LinkSummary = {
   lastUsedAt: string | null;
   useCount: number;
   wasReplaced: boolean;
+  /**
+   * Whether Copy/Open can work for this row. False for revoked, expired
+   * and hash-only legacy links — the UI uses it to disable the buttons
+   * rather than offering an action that would fail.
+   */
+  canCopy: boolean;
+  /**
+   * True only for an ACTIVE link that has no ciphertext: the one case
+   * where a deliberate Replace would make copying possible. Expired and
+   * revoked rows are not offered a replacement prompt, because replacing
+   * is not what they need.
+   */
+  needsReplacementToCopy: boolean;
 };
 
 export type ListLinksResult =
-  | { ok: true; links: LinkSummary[]; migrationMissing: boolean }
+  | {
+      ok: true;
+      links: LinkSummary[];
+      migrationMissing: boolean;
+      /** False when INTAKE_LINK_ENC_KEY is unset, so Studio can say why. */
+      cryptoConfigured: boolean;
+    }
   | { ok: false; error: string };
 
 /**
@@ -257,22 +285,123 @@ export async function listIntakeLinks(restaurantId: string): Promise<ListLinksRe
   }
 
   const { rows, migrationMissing } = await listLinksForRestaurant(restaurantId);
+  const cryptoConfigured = isLinkCryptoConfigured();
+
   return {
     ok: true,
     migrationMissing,
-    links: rows.map((l) => ({
-      id: l.id,
-      prefix: l.code_prefix,
-      status: linkStatus(l),
-      expiresAt: l.expires_at,
-      createdAt: l.created_at,
-      createdBy: l.created_by,
-      lastUsedAt: l.last_used_at ?? null,
-      // The column is NOT NULL DEFAULT 0, but guard anyway so a row that
-      // predates the default can never render a blank count.
-      useCount: l.use_count ?? 0,
-      wasReplaced: Boolean(l.replaced_by),
-    })),
+    cryptoConfigured,
+    links: rows.map((l) => {
+      const status = linkStatus(l);
+      return {
+        id: l.id,
+        prefix: l.code_prefix,
+        status,
+        expiresAt: l.expires_at,
+        createdAt: l.created_at,
+        createdBy: l.created_by,
+        lastUsedAt: l.last_used_at ?? null,
+        // The column is NOT NULL DEFAULT 0, but guard anyway so a row that
+        // predates the default can never render a blank count.
+        useCount: l.use_count ?? 0,
+        wasReplaced: Boolean(l.replaced_by),
+        // Note what is NOT here: the ciphertext. Whether a code can be
+        // recovered is a boolean to the browser; the envelope itself
+        // never leaves the server.
+        canCopy: canRevealLink(l),
+        needsReplacementToCopy: status === "active" && !l.code_encrypted,
+      };
+    }),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// RETRIEVAL
+// ═══════════════════════════════════════════════════════════════════════
+
+export type RevealResult =
+  | { ok: true; url: string; prefix: string; expiresAt: string }
+  | { ok: false; error: string; needsReplacement?: boolean };
+
+/**
+ * Hand an authenticated admin the URL of an existing ACTIVE link.
+ *
+ * This is the whole point of the ciphertext: an operator who refreshed
+ * Studio, or came back the next day, can re-send the partner the SAME
+ * link instead of replacing it — because replacing invalidates every
+ * other credential that partner holds.
+ *
+ * What it must not do, and does not:
+ *
+ *   * mint a code — no call to `createLink` anywhere below;
+ *   * extend expiry — `expires_at` is read, never written;
+ *   * revoke anything — no write of any kind happens here;
+ *   * count as usage — `touchLink` is for the partner opening the link,
+ *     and an operator copying it is not the partner opening it;
+ *   * log the code or the URL — the audit entry carries the row id and
+ *     the public prefix, nothing that grants access.
+ *
+ * `restaurantId` is a guard, not a convenience: paired with the scoped
+ * read in `getLinkById` it means a link id alone cannot reach across
+ * partners, and the ciphertext's AAD enforces the same binding one layer
+ * down.
+ */
+export async function revealIntakeLink(
+  linkId: string,
+  restaurantId: string,
+): Promise<RevealResult> {
+  // This response contains a live credential. Server Action responses are
+  // POST and are not cached, but say so explicitly so that moving this to
+  // any other transport later cannot silently make it cacheable.
+  noStore();
+
+  let admin: { email: string };
+  try {
+    admin = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Unauthorized" };
+  }
+
+  const revealed = await revealLinkCode(linkId, restaurantId);
+  if (!revealed.ok) {
+    switch (revealed.reason) {
+      case "revoked":
+        return { ok: false, error: "This link was revoked — issue a new one." };
+      case "expired":
+        return { ok: false, error: "This link has expired — issue a new one." };
+      case "legacy_no_ciphertext":
+        return {
+          ok: false,
+          needsReplacement: true,
+          error: "This older link needs a one-time replacement to enable copying.",
+        };
+      case "key_unavailable":
+        return {
+          ok: false,
+          error: "Link retrieval is not configured on this server — set INTAKE_LINK_ENC_KEY.",
+        };
+      case "undecryptable":
+        return {
+          ok: false,
+          needsReplacement: true,
+          error: "This link's stored copy could not be read — replace it to issue a fresh one.",
+        };
+      default:
+        return { ok: false, error: "That link was not found for this restaurant." };
+    }
+  }
+
+  await logAdminAction(admin.email, "reveal_intake_link", restaurantId, {
+    intake_link_id: revealed.link.id,
+    code_prefix: revealed.link.code_prefix,
+    expires_at: revealed.link.expires_at,
+  });
+
+  return {
+    ok: true,
+    url: linkUrl(revealed.code),
+    prefix: revealed.link.code_prefix,
+    expiresAt: revealed.link.expires_at,
   };
 }
 

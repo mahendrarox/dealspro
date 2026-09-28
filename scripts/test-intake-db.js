@@ -205,7 +205,11 @@ VALUES ('Alpha Kitchen','Frisco','1 A St',33.1,-96.8,'alpha'),
 `;
 check("fixture schema applied", sql(fixture).ok);
 
-for (const m of ["migration-009-drop-submissions.sql", "migration-010-intake-links.sql"]) {
+for (const m of [
+  "migration-009-drop-submissions.sql",
+  "migration-010-intake-links.sql",
+  "migration-011-intake-link-ciphertext.sql",
+]) {
   const res = sql(fs.readFileSync(path.join(REPO, m), "utf8"));
   check(`${m} applied`, res.ok, res.out.slice(0, 300));
 }
@@ -426,6 +430,211 @@ check(
 );
 
 // ─── Legacy JWT cutoff ───────────────────────────────────────────────
+
+// ─── Retrievable codes (migration-011) ───────────────────────────────
+
+section("Retrievable codes: ciphertext columns, additive");
+
+// The real encryption module, so this proves the actual envelope the
+// application writes satisfies the actual CHECK constraint and survives a
+// round trip through Postgres — not that two mirrored implementations
+// agree with each other.
+let linkCrypto = null;
+try {
+  require("tsx/cjs/api").register();
+  linkCrypto = require(path.join(REPO, "lib/intake/link-crypto.ts"));
+  process.env.INTAKE_LINK_ENC_KEY = Buffer.alloc(32, 11).toString("base64");
+} catch (err) {
+  console.log(`  [SKIP] real link-crypto module unavailable — ${err.message.slice(0, 60)}`);
+}
+
+check(
+  "code_encrypted column exists and is nullable",
+  one(`SELECT is_nullable FROM information_schema.columns
+       WHERE table_name='intake_links' AND column_name='code_encrypted';`) === "YES",
+);
+check(
+  "code_enc_version column exists and is nullable",
+  one(`SELECT is_nullable FROM information_schema.columns
+       WHERE table_name='intake_links' AND column_name='code_enc_version';`) === "YES",
+);
+check(
+  "neither new column has a default (legacy rows stay NULL)",
+  one(`SELECT count(*) FROM information_schema.columns
+       WHERE table_name='intake_links'
+         AND column_name IN ('code_encrypted','code_enc_version')
+         AND column_default IS NOT NULL;`) === "0",
+);
+check(
+  "both CHECK constraints are present",
+  one(`SELECT count(*) FROM pg_constraint
+       WHERE conrelid='public.intake_links'::regclass
+         AND conname IN ('intake_links_cipher_pair','intake_links_cipher_format');`) === "2",
+);
+
+// ── The pair constraint ──────────────────────────────────────────────
+const CODE_ENC = "FFFFFFFFFFFFFFFFFFFFFF";
+
+check(
+  "a ciphertext without a version is rejected",
+  rejects(
+    mk(REST_A, CODE_ENC, { code_encrypted: `'dp1.aaaa.bbbb.cccc'` }),
+    "intake_links_cipher_pair",
+  ),
+);
+check(
+  "a version without a ciphertext is rejected",
+  rejects(mk(REST_A, CODE_ENC, { code_enc_version: "1" }), "intake_links_cipher_pair"),
+);
+check(
+  "both NULL is accepted (the legacy shape)",
+  sql(mk(REST_A, CODE_ENC)).ok,
+);
+
+// ── The format constraint ────────────────────────────────────────────
+const CODE_FMT = "GGGGGGGGGGGGGGGGGGGGGG";
+check(
+  "a raw 22-character code cannot be stored in code_encrypted",
+  rejects(
+    mk(REST_A, CODE_FMT, { code_encrypted: `'${CODE_FMT}'`, code_enc_version: "1" }),
+    "intake_links_cipher_format",
+  ),
+);
+check(
+  "an envelope with the wrong prefix is rejected",
+  rejects(
+    mk(REST_A, CODE_FMT, { code_encrypted: `'dp2.aaa.bbb.ccc'`, code_enc_version: "1" }),
+    "intake_links_cipher_format",
+  ),
+);
+check(
+  "an envelope with too few segments is rejected",
+  rejects(
+    mk(REST_A, CODE_FMT, { code_encrypted: `'dp1.aaa.bbb'`, code_enc_version: "1" }),
+    "intake_links_cipher_format",
+  ),
+);
+
+// ── Real round trip, restaurant-bound ────────────────────────────────
+if (linkCrypto) {
+  const { encryptCode, decryptCode } = linkCrypto;
+  const CODE_RT = "HHHHHHHHHHHHHHHHHHHHHH";
+  const id = crypto.randomUUID();
+  const codeHash = h(CODE_RT);
+  const env = encryptCode(CODE_RT, { id, restaurantId: REST_A, codeHash });
+
+  const inserted = sql(
+    `INSERT INTO intake_links (id, restaurant_id, code_hash, code_prefix, expires_at, created_by,
+       code_encrypted, code_enc_version)
+     VALUES ('${id}','${REST_A}','${codeHash}','${CODE_RT.slice(0, 6)}',
+             now() + interval '14 days','op@dealspro.ai','${env}',1) RETURNING id;`,
+  );
+  check("a real envelope satisfies the format CHECK", inserted.ok, inserted.out.slice(0, 200));
+
+  const stored = one(`SELECT code_encrypted FROM intake_links WHERE id='${id}';`);
+  check("the envelope survives the round trip byte for byte", stored === env);
+  check(
+    "the stored envelope decrypts back to the original code",
+    decryptCode(stored, { id, restaurantId: REST_A, codeHash }) === CODE_RT,
+  );
+  check(
+    "the plaintext code is nowhere in the row",
+    one(`SELECT count(*) FROM intake_links
+         WHERE id='${id}' AND (code_encrypted LIKE '%${CODE_RT}%' OR code_prefix = '${CODE_RT}');`) === "0",
+  );
+
+  // The AAD binding, exercised against a real second row: copying the
+  // ciphertext onto another restaurant's link must not reveal anything.
+  const idB = crypto.randomUUID();
+  const hashB = h("IIIIIIIIIIIIIIIIIIIIII");
+  sql(`INSERT INTO intake_links (id, restaurant_id, code_hash, code_prefix, expires_at, created_by,
+         code_encrypted, code_enc_version)
+       VALUES ('${idB}','${REST_B}','${hashB}','IIIIII',
+               now() + interval '14 days','op@dealspro.ai','${env}',1);`);
+  const stolen = one(`SELECT code_encrypted FROM intake_links WHERE id='${idB}';`);
+  check(
+    "a ciphertext copied onto another restaurant's row will not decrypt",
+    decryptCode(stolen, { id: idB, restaurantId: REST_B, codeHash: hashB }) === null,
+  );
+
+  // Restaurant isolation of the read the reveal path uses.
+  check(
+    "the reveal read is scoped: link id + wrong restaurant returns nothing",
+    one(`SELECT count(*) FROM intake_links WHERE id='${id}' AND restaurant_id='${REST_B}';`) === "0",
+  );
+  check(
+    "the reveal read is scoped: link id + right restaurant returns one row",
+    one(`SELECT count(*) FROM intake_links WHERE id='${id}' AND restaurant_id='${REST_A}';`) === "1",
+  );
+
+  // Revocation does not erase the stored copy — the application's status
+  // check is what must refuse it, and that is testable only if the row
+  // still has a ciphertext to refuse.
+  sql(`UPDATE intake_links SET revoked_at=now(), revoked_by='op@dealspro.ai' WHERE id='${id}';`);
+  check(
+    "revoking a link leaves the ciphertext in place (the app gates it, not the data)",
+    one(`SELECT (code_encrypted IS NOT NULL)::text FROM intake_links WHERE id='${id}';`) === "true",
+  );
+  check(
+    "a revoked link is still revoked after the reveal-shaped read",
+    one(`SELECT (revoked_at IS NOT NULL)::text FROM intake_links
+         WHERE id='${id}' AND restaurant_id='${REST_A}';`) === "true",
+  );
+}
+
+// ── Legacy rows keep working ─────────────────────────────────────────
+{
+  // A row in exactly the shape migration-010 produced, to stand in for a
+  // link already in a partner's hands. Inserted here rather than reusing
+  // an earlier fixture, because the revocation section deliberately
+  // revokes those and this assertion is about a LIVE legacy link.
+  const CODE_LEGACY = "JJJJJJJJJJJJJJJJJJJJJJ";
+  check("a legacy hash-only row inserts exactly as before", sql(mk(REST_A, CODE_LEGACY)).ok);
+  check(
+    "a pre-existing hash-only link is still resolvable by code_hash",
+    one(`SELECT count(*) FROM intake_links
+         WHERE code_hash='${h(CODE_LEGACY)}' AND revoked_at IS NULL
+           AND expires_at > now() AND code_encrypted IS NULL;`) === "1",
+  );
+  check(
+    "a legacy row carries neither ciphertext nor version",
+    one(`SELECT count(*) FROM intake_links
+         WHERE code_hash='${h(CODE_LEGACY)}'
+           AND (code_encrypted IS NOT NULL OR code_enc_version IS NOT NULL);`) === "0",
+  );
+  check(
+    "migration-011 added no ciphertext to any row it did not create",
+    Number(one(`SELECT count(*) FROM intake_links WHERE code_encrypted IS NULL;`)) > 0,
+  );
+}
+
+// ── Client roles still see nothing, including the new column ─────────
+check(
+  "anon selecting code_encrypted gets zero rows",
+  one(`SET ROLE anon; SELECT count(*) FROM intake_links WHERE code_encrypted IS NOT NULL;`) === "0",
+);
+check(
+  "authenticated selecting code_encrypted gets zero rows",
+  one(`SET ROLE authenticated; SELECT count(*) FROM intake_links WHERE code_encrypted IS NOT NULL;`) === "0",
+);
+for (const role of ["anon", "authenticated"]) {
+  check(
+    `${role} still cannot TRUNCATE intake_links after migration-011`,
+    one(`SELECT has_table_privilege('${role}','public.intake_links','TRUNCATE')::text;`) === "false",
+  );
+}
+
+// ── Idempotent ───────────────────────────────────────────────────────
+{
+  const again = sql(fs.readFileSync(path.join(REPO, "migration-011-intake-link-ciphertext.sql"), "utf8"));
+  check("migration-011 is safe to re-run", again.ok, again.out.slice(0, 200));
+  check(
+    "re-running it did not duplicate the constraints",
+    one(`SELECT count(*) FROM pg_constraint
+         WHERE conrelid='public.intake_links'::regclass
+           AND conname IN ('intake_links_cipher_pair','intake_links_cipher_format');`) === "2",
+  );
+}
 
 section("Legacy JWT cutoff table");
 

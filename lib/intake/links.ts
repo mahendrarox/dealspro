@@ -1,5 +1,11 @@
 import crypto from "crypto";
 import { adminDb } from "@/lib/supabase-admin";
+import {
+  ENVELOPE_VERSION,
+  decryptCode,
+  encryptCode,
+  isLinkCryptoConfigured,
+} from "./link-crypto";
 
 /**
  * Short private intake links: /i/<code>.
@@ -12,11 +18,17 @@ import { adminDb } from "@/lib/supabase-admin";
  *
  * Handling rules, which the rest of the codebase depends on:
  *
- *   * The plaintext code exists for exactly one moment — inside
- *     `createLink()`, which returns it to the caller. It is never
- *     persisted, never logged, and never recoverable afterwards.
- *   * Only `sha256(normalized code)` is stored. A dump of this table
- *     opens nothing.
+ *   * `sha256(normalized code)` is what VALIDATION uses, always. It is
+ *     unique, indexed, and irreversible, so the resolution path can
+ *     never be turned into a way to read codes out.
+ *   * The code is additionally stored ENCRYPTED (`code_encrypted`) under
+ *     a dedicated server-only key that is not in the database, so an
+ *     authenticated operator can copy or re-open an existing active link
+ *     instead of replacing it. See `./link-crypto`.
+ *   * The plaintext is never logged and never written anywhere else.
+ *     Rows created before this feature — or in an environment with no
+ *     key — have `code_encrypted = NULL` and keep working unchanged;
+ *     they simply cannot be re-shown.
  *   * Resolution is a single indexed lookup on that hash. Expiry and
  *     revocation are re-evaluated on EVERY resolution, so revoking a link
  *     takes effect on the restaurant's next request.
@@ -61,10 +73,54 @@ export type IntakeLinkRow = {
   created_at: string;
   last_used_at: string | null;
   use_count: number;
+  /** AES-256-GCM envelope, or null for a hash-only legacy row. */
+  code_encrypted?: string | null;
+  code_enc_version?: number | null;
 };
 
-export const LINK_SELECT_COLS =
+/** Columns that exist from migration-010 onwards. */
+export const LINK_BASE_COLS =
   "id, restaurant_id, code_hash, code_prefix, expires_at, revoked_at, revoked_by, revoke_reason, replaced_by, created_by, created_at, last_used_at, use_count";
+
+/** Columns added by migration-011. */
+export const LINK_CIPHER_COLS = "code_encrypted, code_enc_version";
+
+export const LINK_SELECT_COLS = `${LINK_BASE_COLS}, ${LINK_CIPHER_COLS}`;
+
+/**
+ * Whether migration-011 has been applied, as learned from the database.
+ *
+ * `null` means "not yet known, assume present". The first query that
+ * comes back complaining about a missing column flips this to false for
+ * the life of the process, so the fallback costs one wasted round trip
+ * total rather than one per request. A deploy that lands before the
+ * migration therefore degrades to hash-only behaviour instead of
+ * throwing, which is the whole point of the column being additive.
+ */
+let cipherColumnsPresent: boolean | null = null;
+
+function selectCols(): string {
+  return cipherColumnsPresent === false ? LINK_BASE_COLS : LINK_SELECT_COLS;
+}
+
+/**
+ * True when this error means migration-011 is missing. Also records the
+ * fact, so the caller's retry is the last one that will ever be needed.
+ */
+function noteMissingCipherColumns(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false;
+  const missing =
+    error.code === "42703" || /code_encrypted|code_enc_version/i.test(error.message ?? "");
+  if (missing) cipherColumnsPresent = false;
+  return missing;
+}
+
+/** Test seam: reset the learned column state between cases. */
+export function resetCipherColumnCache(): void {
+  cipherColumnsPresent = null;
+}
 
 /**
  * True when the error means migration-010 has not been applied yet.
@@ -121,8 +177,18 @@ export type CreateLinkResult =
   | { ok: false; error: string; migrationMissing?: boolean };
 
 /**
- * Mint one link. The returned `code` is the ONLY copy that will ever
- * exist — the caller must hand it to the operator and then drop it.
+ * Mint one link. The returned `code` is the caller's copy to hand to the
+ * operator; an encrypted copy is stored so an admin can retrieve the same
+ * URL later without replacing the link.
+ *
+ * The row id is generated here rather than by the column default,
+ * because the ciphertext's AAD is bound to it — we have to know the id
+ * before we can encrypt.
+ *
+ * Encryption is best-effort by design: with no key configured the link is
+ * still minted, hash-only, exactly as it would have been before this
+ * feature existed. Refusing to mint would take away a working capability
+ * in order to protect a convenience.
  */
 export async function createLink(opts: {
   restaurantId: string;
@@ -131,25 +197,61 @@ export async function createLink(opts: {
 }): Promise<CreateLinkResult> {
   const ttlDays = opts.ttlDays ?? INTAKE_LINK_TTL_DAYS;
   const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
+  const canEncrypt = isLinkCryptoConfigured();
 
-  // A collision at 78 bits is not a real event, but the unique index
+  // A collision at 128 bits is not a real event, but the unique index
   // makes it a hard error rather than a silent overwrite, so retry.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = generateCode();
-    const { data, error } = await adminDb
+    const id = crypto.randomUUID();
+    const codeHash = hashCode(code);
+
+    const base = {
+      id,
+      restaurant_id: opts.restaurantId,
+      code_hash: codeHash,
+      code_prefix: code.slice(0, CODE_PREFIX_LENGTH),
+      expires_at: expiresAt.toISOString(),
+      created_by: opts.createdBy,
+    };
+
+    let cipher: { code_encrypted: string; code_enc_version: number } | null = null;
+    if (canEncrypt && cipherColumnsPresent !== false) {
+      try {
+        cipher = {
+          code_encrypted: encryptCode(code, {
+            id,
+            restaurantId: opts.restaurantId,
+            codeHash,
+          }),
+          code_enc_version: ENVELOPE_VERSION,
+        };
+      } catch (err) {
+        // A misconfigured key must not cost the operator their link.
+        console.error(
+          "[intake/links] encryption unavailable, storing hash only:",
+          err instanceof Error ? err.message : "unknown error",
+        );
+      }
+    }
+
+    let { data, error } = await adminDb
       .from("intake_links")
-      .insert({
-        restaurant_id: opts.restaurantId,
-        code_hash: hashCode(code),
-        code_prefix: code.slice(0, CODE_PREFIX_LENGTH),
-        expires_at: expiresAt.toISOString(),
-        created_by: opts.createdBy,
-      })
-      .select(LINK_SELECT_COLS)
+      .insert(cipher ? { ...base, ...cipher } : base)
+      .select(selectCols())
       .single();
 
+    // migration-011 not applied yet → retry without the new columns.
+    if (error && noteMissingCipherColumns(error)) {
+      ({ data, error } = await adminDb
+        .from("intake_links")
+        .insert(base)
+        .select(LINK_BASE_COLS)
+        .single());
+    }
+
     if (!error && data) {
-      return { ok: true, code, link: data as IntakeLinkRow };
+      return { ok: true, code, link: data as unknown as IntakeLinkRow };
     }
     if (error && isMissingLinksTable(error)) {
       return { ok: false, error: LINKS_MIGRATION_REQUIRED, migrationMissing: true };
@@ -183,11 +285,19 @@ export type LinkResolution =
 export async function resolveCode(rawCode: string): Promise<LinkResolution> {
   if (!looksLikeCode(rawCode)) return { ok: false, reason: "not_found" };
 
-  const { data, error } = await adminDb
+  let { data, error } = await adminDb
     .from("intake_links")
-    .select(LINK_SELECT_COLS)
+    .select(selectCols())
     .eq("code_hash", hashCode(rawCode))
     .maybeSingle();
+
+  if (error && noteMissingCipherColumns(error)) {
+    ({ data, error } = await adminDb
+      .from("intake_links")
+      .select(LINK_BASE_COLS)
+      .eq("code_hash", hashCode(rawCode))
+      .maybeSingle());
+  }
 
   if (error) {
     if (isMissingLinksTable(error)) return { ok: false, reason: "unavailable" };
@@ -196,7 +306,7 @@ export async function resolveCode(rawCode: string): Promise<LinkResolution> {
   }
   if (!data) return { ok: false, reason: "not_found" };
 
-  const link = data as IntakeLinkRow;
+  const link = data as unknown as IntakeLinkRow;
   if (link.revoked_at) return { ok: false, reason: "revoked" };
   if (new Date(link.expires_at).getTime() <= Date.now()) {
     return { ok: false, reason: "expired" };
@@ -256,19 +366,127 @@ export function linkStatus(link: IntakeLinkRow, now: number = Date.now()): LinkS
 export async function listLinksForRestaurant(
   restaurantId: string,
 ): Promise<{ rows: IntakeLinkRow[]; migrationMissing: boolean }> {
-  const { data, error } = await adminDb
-    .from("intake_links")
-    .select(LINK_SELECT_COLS)
-    .eq("restaurant_id", restaurantId)
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const query = (cols: string) =>
+    adminDb
+      .from("intake_links")
+      .select(cols)
+      .eq("restaurant_id", restaurantId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+  let { data, error } = await query(selectCols());
+  if (error && noteMissingCipherColumns(error)) {
+    ({ data, error } = await query(LINK_BASE_COLS));
+  }
 
   if (error) {
     if (isMissingLinksTable(error)) return { rows: [], migrationMissing: true };
     console.error("[intake/links] listLinksForRestaurant failed:", error.message);
     return { rows: [], migrationMissing: false };
   }
-  return { rows: (data ?? []) as IntakeLinkRow[], migrationMissing: false };
+  return { rows: (data ?? []) as unknown as IntakeLinkRow[], migrationMissing: false };
+}
+
+/**
+ * One link by id, scoped to its restaurant.
+ *
+ * `restaurantId` is REQUIRED, not optional: this is the read behind the
+ * reveal path, and a link id on its own would let a malformed or
+ * malicious call read a credential belonging to another partner. The
+ * caller already knows which restaurant's panel it is rendering, so
+ * demanding it costs nothing and closes the hole by construction.
+ */
+export async function getLinkById(
+  linkId: string,
+  restaurantId: string,
+): Promise<IntakeLinkRow | null> {
+  const query = (cols: string) =>
+    adminDb
+      .from("intake_links")
+      .select(cols)
+      .eq("id", linkId)
+      .eq("restaurant_id", restaurantId)
+      .maybeSingle();
+
+  let { data, error } = await query(selectCols());
+  if (error && noteMissingCipherColumns(error)) {
+    ({ data, error } = await query(LINK_BASE_COLS));
+  }
+
+  if (error) {
+    if (!isMissingLinksTable(error)) {
+      console.error("[intake/links] getLinkById failed:", error.message);
+    }
+    return null;
+  }
+  return (data as unknown as IntakeLinkRow | null) ?? null;
+}
+
+/** Whether this row could be re-shown to an operator right now. */
+export function canRevealLink(link: IntakeLinkRow, now: number = Date.now()): boolean {
+  return (
+    linkStatus(link, now) === "active" &&
+    Boolean(link.code_encrypted) &&
+    isLinkCryptoConfigured()
+  );
+}
+
+export type RevealReason =
+  | "not_found"
+  | "revoked"
+  | "expired"
+  | "legacy_no_ciphertext"
+  | "key_unavailable"
+  | "undecryptable";
+
+export type RevealResult =
+  | { ok: true; code: string; link: IntakeLinkRow }
+  | { ok: false; reason: RevealReason };
+
+/**
+ * Recover the plaintext code for one active link.
+ *
+ * Re-checks status HERE rather than trusting the caller, so a revoked or
+ * expired link can never be handed back even if Studio's list is stale —
+ * the operator's browser could be showing a row that was revoked from
+ * another tab a second ago.
+ *
+ * The reasons are distinguished for the OPERATOR, who is already
+ * authenticated and already knows this link exists. That is the opposite
+ * of the visitor-facing resolver, which collapses every failure into one
+ * neutral message so a prober learns nothing.
+ */
+export async function revealLinkCode(
+  linkId: string,
+  restaurantId: string,
+): Promise<RevealResult> {
+  const link = await getLinkById(linkId, restaurantId);
+  if (!link) return { ok: false, reason: "not_found" };
+
+  const status = linkStatus(link);
+  if (status === "revoked") return { ok: false, reason: "revoked" };
+  if (status === "expired") return { ok: false, reason: "expired" };
+
+  if (!link.code_encrypted) return { ok: false, reason: "legacy_no_ciphertext" };
+  if (!isLinkCryptoConfigured()) return { ok: false, reason: "key_unavailable" };
+
+  const code = decryptCode(link.code_encrypted, {
+    id: link.id,
+    restaurantId: link.restaurant_id,
+    codeHash: link.code_hash,
+  });
+  if (!code) return { ok: false, reason: "undecryptable" };
+
+  // Belt and braces: the stored ciphertext must decrypt to a code whose
+  // hash is the one this row is indexed under. If it does not, something
+  // wrote a mismatched pair and handing this out would send the partner
+  // to a dead or — worse — someone else's link.
+  if (hashCode(code) !== link.code_hash) {
+    console.error("[intake/links] ciphertext/hash mismatch on link", link.id);
+    return { ok: false, reason: "undecryptable" };
+  }
+
+  return { ok: true, code, link };
 }
 
 export type RevokeResult = { ok: true; revoked: number } | { ok: false; error: string };

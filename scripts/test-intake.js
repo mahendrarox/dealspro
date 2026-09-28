@@ -34,6 +34,8 @@ try {
 process.env.INTAKE_LLM_PROVIDER = "mock";
 process.env.ADMIN_JWT_SECRET = "admin-secret-for-tests-only-0123456789";
 process.env.INTAKE_JWT_SECRET = "intake-secret-for-tests-only-9876543210";
+// 32 bytes, base64. Test-only: never a real key, and never committed as one.
+process.env.INTAKE_LINK_ENC_KEY = Buffer.alloc(32, 7).toString("base64");
 
 const { SignJWT, jwtVerify } = require("jose");
 
@@ -65,12 +67,22 @@ const {
   looksLikeCode,
   hashCode,
   linkStatus,
+  canRevealLink,
   isLegacyTokenCutOff,
   CODE_LENGTH,
   CODE_ENTROPY_BYTES,
   CODE_PREFIX_LENGTH,
   INTAKE_LINK_TTL_DAYS,
 } = require(path.resolve(__dirname, "../lib/intake/links.ts"));
+const {
+  encryptCode,
+  decryptCode,
+  linkAad,
+  generateEncKey,
+  isLinkCryptoConfigured,
+  ENVELOPE_VERSION,
+  ENC_KEY_ENV,
+} = require(path.resolve(__dirname, "../lib/intake/link-crypto.ts"));
 const { toIso } = require(path.resolve(__dirname, "../app/admin/drops/form-utils.ts"));
 const { validatePickupWindow } = require(path.resolve(__dirname, "../lib/admin/pickup-window.ts"));
 
@@ -942,7 +954,207 @@ function testShortCodes() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 10. CODEBASE INVARIANTS
+// 10. LINK CODE ENCRYPTION AT REST
+// ═══════════════════════════════════════════════════════════════════════
+
+function testLinkCrypto() {
+  section("Link code encryption: AES-256-GCM, row-bound, tamper-evident");
+
+  const KEY = process.env[ENC_KEY_ENV];
+  const parts = {
+    id: "33333333-3333-4333-8333-333333333333",
+    restaurantId: RESTAURANT_A,
+    codeHash: hashCode("AAAAAAAAAAAAAAAAAAAAAA"),
+  };
+  const code = generateCode();
+
+  // ── Round trip ───────────────────────────────────────────────────
+  const envelope = encryptCode(code, parts);
+  check("Crypto: a code round-trips", decryptCode(envelope, parts) === code);
+  check("Crypto: configured when the key is present", isLinkCryptoConfigured() === true);
+  check("Crypto: envelope version is recorded as 1", ENVELOPE_VERSION === 1);
+
+  // ── Envelope shape ───────────────────────────────────────────────
+  check(
+    "Crypto: envelope is dp1.<iv>.<ciphertext>.<tag>, all base64url",
+    /^dp1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(envelope),
+    envelope.slice(0, 12),
+  );
+  // The same regex the migration's CHECK constraint enforces, so the
+  // database can never hold an envelope this code would not produce.
+  check(
+    "Crypto: envelope satisfies the migration-011 CHECK regex",
+    new RegExp("^dp1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$").test(envelope),
+  );
+  check(
+    "Crypto: a 22-character code does NOT satisfy it (a raw code cannot be stored there)",
+    !/^dp1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(code),
+  );
+  check("Crypto: the plaintext code never appears in the envelope", !envelope.includes(code));
+  check(
+    "Crypto: the key never appears in the envelope",
+    !envelope.includes(KEY) && !envelope.includes(Buffer.from(KEY, "base64").toString("base64url")),
+  );
+
+  // ── Randomised IV ────────────────────────────────────────────────
+  const twice = [encryptCode(code, parts), encryptCode(code, parts)];
+  check(
+    "Crypto: encrypting the same code twice gives different envelopes (fresh IV)",
+    twice[0] !== twice[1],
+  );
+  check(
+    "Crypto: both still decrypt to the same code",
+    twice.every((e) => decryptCode(e, parts) === code),
+  );
+
+  // ── Tampering ────────────────────────────────────────────────────
+  const [, ivB64, ctB64, tagB64] = envelope.split(".");
+  // Flip a real BYTE, then re-encode. Mutating the last base64url
+  // character is not reliable: trailing characters can carry unused bits,
+  // so the decoded bytes come back identical and the "tampered"
+  // ciphertext decrypts fine — a test that passes or fails by luck.
+  const flip = (b64) => {
+    const buf = Buffer.from(b64, "base64url");
+    buf[0] ^= 0x01;
+    return buf.toString("base64url");
+  };
+  check(
+    "Crypto: a flipped ciphertext byte fails the tag (returns null)",
+    decryptCode(`dp1.${ivB64}.${flip(ctB64)}.${tagB64}`, parts) === null,
+  );
+  check(
+    "Crypto: a flipped tag byte fails (returns null)",
+    decryptCode(`dp1.${ivB64}.${ctB64}.${flip(tagB64)}`, parts) === null,
+  );
+  check(
+    "Crypto: a flipped IV byte fails (returns null)",
+    decryptCode(`dp1.${flip(ivB64)}.${ctB64}.${tagB64}`, parts) === null,
+  );
+  check(
+    "Crypto: a truncated ciphertext fails (returns null)",
+    decryptCode(`dp1.${ivB64}.${ctB64.slice(0, -4)}.${tagB64}`, parts) === null,
+  );
+
+  // ── Malformed input never throws ─────────────────────────────────
+  const junk = [
+    null, undefined, "", "not-an-envelope", "dp1.a.b", "dp1.a.b.c.d",
+    `dp2.${ivB64}.${ctB64}.${tagB64}`, `.${ivB64}.${ctB64}.${tagB64}`,
+    `dp1...${tagB64}`, code,
+  ];
+  let threw = null;
+  for (const bad of junk) {
+    try {
+      if (decryptCode(bad, parts) !== null) threw = `accepted: ${String(bad).slice(0, 20)}`;
+    } catch (err) {
+      threw = `threw on ${String(bad).slice(0, 20)}: ${err.message}`;
+    }
+  }
+  check("Crypto: every malformed envelope returns null and never throws", threw === null, threw ?? "");
+
+  // ── Row binding (the cross-restaurant defence) ───────────────────
+  check(
+    "Crypto: a ciphertext moved to another link id fails",
+    decryptCode(envelope, { ...parts, id: "44444444-4444-4444-8444-444444444444" }) === null,
+  );
+  check(
+    "Crypto: a ciphertext moved to another restaurant fails",
+    decryptCode(envelope, { ...parts, restaurantId: RESTAURANT_B }) === null,
+  );
+  check(
+    "Crypto: a ciphertext moved onto a different code_hash fails",
+    decryptCode(envelope, { ...parts, codeHash: hashCode("BBBBBBBBBBBBBBBBBBBBBB") }) === null,
+  );
+  check(
+    "Crypto: AAD covers id, restaurant and code hash",
+    (() => {
+      const aad = linkAad(parts).toString("utf8");
+      return (
+        aad.includes(parts.id) &&
+        aad.includes(parts.restaurantId) &&
+        aad.includes(parts.codeHash) &&
+        aad.startsWith("dp1|")
+      );
+    })(),
+  );
+
+  // ── Key handling ─────────────────────────────────────────────────
+  const restore = process.env[ENC_KEY_ENV];
+  try {
+    // A different key of the correct length must not decrypt.
+    process.env[ENC_KEY_ENV] = Buffer.alloc(32, 9).toString("base64");
+    check("Crypto: a different key cannot decrypt", decryptCode(envelope, parts) === null);
+
+    // Accepted encodings, all decoding to the same 32 bytes.
+    const bytes = Buffer.alloc(32, 3);
+    for (const [label, encoded] of [
+      ["base64", bytes.toString("base64")],
+      ["base64url", bytes.toString("base64url")],
+      ["hex", bytes.toString("hex")],
+    ]) {
+      process.env[ENC_KEY_ENV] = encoded;
+      const e = encryptCode("probe", parts);
+      check(`Crypto: ${label} key encoding is accepted`, decryptCode(e, parts) === "probe");
+    }
+
+    // Wrong-length and missing keys.
+    process.env[ENC_KEY_ENV] = Buffer.alloc(31, 3).toString("base64");
+    check("Crypto: a 31-byte key is refused", isLinkCryptoConfigured() === false);
+    process.env[ENC_KEY_ENV] = "";
+    check("Crypto: an empty key is refused", isLinkCryptoConfigured() === false);
+    delete process.env[ENC_KEY_ENV];
+    check("Crypto: a missing key reports unconfigured", isLinkCryptoConfigured() === false);
+    check(
+      "Crypto: with no key, decryption returns null rather than throwing",
+      decryptCode(envelope, parts) === null,
+    );
+    let encThrew = false;
+    try { encryptCode("x", parts); } catch { encThrew = true; }
+    check("Crypto: with no key, encryption throws so the caller must decide", encThrew);
+  } finally {
+    process.env[ENC_KEY_ENV] = restore;
+  }
+  check("Crypto: key restored for the remaining tests", isLinkCryptoConfigured() === true);
+
+  // A generated key is the right size and shape for the setup docs.
+  const fresh = generateEncKey();
+  check(
+    "Crypto: generateEncKey emits 32 bytes of base64",
+    Buffer.from(fresh, "base64").length === 32,
+  );
+
+  // ── canRevealLink: only an active row with a stored copy ─────────
+  const row = (over = {}) => ({
+    id: parts.id,
+    restaurant_id: RESTAURANT_A,
+    code_hash: parts.codeHash,
+    code_prefix: "Abc123",
+    expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    revoked_at: null,
+    code_encrypted: envelope,
+    code_enc_version: 1,
+    ...over,
+  });
+  check("Reveal: an active link with a stored copy can be revealed", canRevealLink(row()) === true);
+  check(
+    "Reveal: a revoked link cannot",
+    canRevealLink(row({ revoked_at: new Date().toISOString() })) === false,
+  );
+  check(
+    "Reveal: an expired link cannot",
+    canRevealLink(row({ expires_at: new Date(Date.now() - 1000).toISOString() })) === false,
+  );
+  check(
+    "Reveal: a hash-only legacy link cannot",
+    canRevealLink(row({ code_encrypted: null, code_enc_version: null })) === false,
+  );
+  check(
+    "Reveal: status still comes from linkStatus, not from the ciphertext",
+    linkStatus(row({ code_encrypted: null })) === "active",
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 11. CODEBASE INVARIANTS
 // ═══════════════════════════════════════════════════════════════════════
 
 const fs = require("fs");
@@ -1130,10 +1342,24 @@ function testCodebaseInvariants() {
   // The plaintext code must be hashed on the way in and never persisted.
   const linksSrc = read(path.resolve(__dirname, "../lib/intake/links.ts"));
   check(
-    "Short links: createLink stores code_hash, never the code",
-    /code_hash:\s*hashCode\(code\)/.test(linksSrc) &&
-      !/\bcode:\s*code\b/.test(linksSrc) &&
-      !/insert\(\{[^}]*\bcode\b\s*:/.test(linksSrc),
+    "Short links: createLink hashes the code on the way in",
+    // The hash may be computed inline or bound to a local first (the AAD
+    // needs it too), but it must come from hashCode(code) and be what
+    // lands in code_hash.
+    /const\s+codeHash\s*=\s*hashCode\(code\)/.test(linksSrc) ||
+      /code_hash:\s*hashCode\(code\)/.test(linksSrc),
+  );
+  check(
+    "Short links: createLink never persists the plaintext code",
+    !/\bcode:\s*code\b/.test(linksSrc) &&
+      !/insert\(\{[^}]*\bcode\b\s*:/.test(linksSrc) &&
+      // code_encrypted must be fed through encryptCode, never the raw code.
+      !/code_encrypted:\s*code\b/.test(linksSrc),
+  );
+  check(
+    "Short links: the stored copy goes through authenticated encryption",
+    /code_encrypted:\s*encryptCode\(code,/.test(linksSrc) &&
+      /codeHash,?\s*\n?\s*\}\)/.test(linksSrc.replace(/\r/g, "")),
   );
   check(
     "Short links: only the prefix is stored in the clear",
@@ -1155,6 +1381,127 @@ function testCodebaseInvariants() {
     "Short links: no intake module logs a code",
     codeLogged.length === 0,
     `logs a code: ${codeLogged.join(", ")}`,
+  );
+
+
+  // ── Retrievable links: the reveal path must not become a mint ────
+  // Just the body of revealIntakeLink, not everything after it — slicing
+  // to end-of-file would drag in the review-outcome actions and make any
+  // assertion below meaningless.
+  const revealStart = adminSrc.indexOf("export async function revealIntakeLink");
+  const revealEnd = adminSrc.indexOf("\nexport ", revealStart + 10);
+  const revealFn = adminSrc.slice(revealStart, revealEnd === -1 ? undefined : revealEnd);
+  check(
+    "Reveal: revealIntakeLink starts with requireAdmin()",
+    /requireAdmin\(\)/.test(revealFn.slice(0, 1200)),
+  );
+  check(
+    "Reveal: revealIntakeLink mints nothing",
+    !/createLink\(/.test(revealFn) && !/createIntakeLink\(/.test(revealFn),
+  );
+  check(
+    "Reveal: revealIntakeLink calls no revocation helper and writes no expiry",
+    // Strip string literals first: the function legitimately explains
+    // "This link was revoked" to the operator. What must not appear is a
+    // CALL to a revoke helper, or a write of expires_at.
+    (() => {
+      const code2 = revealFn.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+      return (
+        !/revoke[A-Za-z]*\(/.test(code2) &&
+        !/expires_at:\s*[^,\n]/.test(code2.replace(/expires_at: revealed\.link\.expires_at/g, "")) &&
+        !/\.update\(/.test(code2) &&
+        !/\.insert\(/.test(code2)
+      );
+    })(),
+  );
+  check(
+    "Reveal: revealIntakeLink does not count as partner usage",
+    !/touchLink\(/.test(revealFn) && !/countSubmission\(/.test(revealFn),
+  );
+  check(
+    "Reveal: the retrieval response is marked no-store",
+    /noStore\(\)/.test(revealFn.slice(0, 900)),
+  );
+  check(
+    "Reveal: the reveal audit entry carries the link id, never a url or code",
+    (() => {
+      const at = revealFn.indexOf('"reveal_intake_link"');
+      if (at === -1) return false;
+      // The logAdminAction payload object only — up to its closing "});".
+      const payload = revealFn.slice(at, revealFn.indexOf("});", at));
+      return (
+        /intake_link_id:/.test(payload) &&
+        !/\burl\b/.test(payload) &&
+        !/linkUrl/.test(payload) &&
+        !/\bcode:/.test(payload)
+      );
+    })(),
+  );
+
+  // The ciphertext is server-only state. Nothing in the browser bundle
+  // may name the column or the key, and no client component may import
+  // the crypto module.
+  const cipherAllowed = [
+    "lib/intake/links.ts",
+    "lib/intake/link-crypto.ts",
+    "lib/intake/admin-actions.ts",
+    "scripts/test-intake.js",
+    "scripts/test-intake-db.js",
+  ];
+  const cipherRefs = files
+    .filter((f) => /code_encrypted/.test(read(f)))
+    .map(rel)
+    .filter((f) => !cipherAllowed.includes(f));
+  check(
+    "Reveal: code_encrypted is named only by the server modules that handle it",
+    cipherRefs.length === 0,
+    `also referenced by: ${cipherRefs.join(", ")}`,
+  );
+
+  // Naming the variable in an operator-facing message is fine. READING it
+  // anywhere but the crypto module is not — that is how a key ends up in
+  // a log line or a response body.
+  const keyReaders = files
+    .filter((f) => {
+      const src = read(f);
+      return (
+        /process\.env\[?\s*["']?INTAKE_LINK_ENC_KEY/.test(src) ||
+        /process\.env\[ENC_KEY_ENV\]/.test(src)
+      );
+    })
+    .map(rel)
+    .filter((f) => !["lib/intake/link-crypto.ts", "scripts/test-intake.js"].includes(f));
+  check(
+    "Reveal: the encryption key is read in exactly one module",
+    keyReaders.length === 0,
+    `also read by: ${keyReaders.join(", ")}`,
+  );
+
+  const clientImportsCrypto = files
+    .filter((f) => {
+      const src = read(f);
+      return /^["']use client["']/m.test(src) && /link-crypto/.test(src);
+    })
+    .map(rel);
+  check(
+    "Reveal: no client component imports the crypto module",
+    clientImportsCrypto.length === 0,
+    `imported by: ${clientImportsCrypto.join(", ")}`,
+  );
+
+  // A log line containing a full /i/<code> URL grants access just as
+  // surely as one containing the code.
+  const urlLogged = files.filter((f) => {
+    const src = read(f);
+    return (
+      rel(f).startsWith("lib/intake/") &&
+      /console\.(log|error|warn|info)\([^)]*(linkUrl|\/i\/|res\.url|\burl\b)[^)]*\)/.test(src)
+    );
+  }).map(rel);
+  check(
+    "Reveal: no intake module logs a full link URL",
+    urlLogged.length === 0,
+    `logs a url: ${urlLogged.join(", ")}`,
   );
 
   // Every credential entry point goes through the one resolver.
@@ -1217,6 +1564,7 @@ async function main() {
     testPickupWindow();
     testSubmitPayload();
     testShortCodes();
+    testLinkCrypto();
     testCodebaseInvariants();
   } catch (err) {
     console.error("\n[FATAL] intake suite crashed:", err);

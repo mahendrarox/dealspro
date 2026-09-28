@@ -15,6 +15,10 @@ export type AdminAction =
   | "create_intake_link"
   | "replace_intake_link"
   | "revoke_intake_link"
+  // Read-only: an operator copied or opened an existing link. Recorded
+  // because handing out a live credential is worth an audit trail; the
+  // entry carries the link id and public prefix, never the code.
+  | "reveal_intake_link"
   | "publish_submission"
   | "reject_submission";
 
