@@ -5,6 +5,7 @@ import { formatTimeWindow } from "@/lib/drops/helpers";
 import { normalizePhone } from "@/lib/phone";
 import { getSpotsInfo, CONFIRMED_STATUS } from "@/lib/spots";
 import { getDropByIdForServer, getDropRow } from "@/lib/drops/db";
+import { normalizeTag } from "@/lib/attribution/tag";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -13,6 +14,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const { phone: rawPhone, drop_item_id } = body ?? {};
     const quantity = Math.max(1, Math.min(4, parseInt(String(body?.quantity ?? 1), 10) || 1));
+
+    // Channel attribution. Re-normalized here rather than trusted: this
+    // endpoint is reachable without ever loading the page that produced the
+    // value. A missing or invalid tag is simply absent — it must never
+    // block, delay or alter a checkout, because a broken share link is not
+    // a reason to refuse someone's money.
+    const tag = normalizeTag(body?.tag);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
     if (!drop_item_id) {
@@ -141,6 +149,9 @@ export async function POST(request: NextRequest) {
       metadata: {
         // Attach the known phone only as a fallback; never pass an empty string.
         ...(phone ? { phone } : {}),
+        // Same rule for the tag: present only when valid. An absent key is
+        // unambiguous at the far end; an empty string is not.
+        ...(tag ? { tag } : {}),
         drop_item_id,
         quantity: String(quantity),
         date: item.date,

@@ -10,9 +10,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ order: null, card: null });
   }
 
+  // Explicit column list, not `*`. The row is echoed to the browser
+  // alongside the rendered card, so a new column on `orders` must never be
+  // published by accident. `tag` is internal attribution and is excluded;
+  // everything here is what `card` below is built from.
   const { data: order, error } = await supabase
     .from("orders")
-    .select("*")
+    .select(
+      "id, phone, drop_item_id, price_paid, quantity, qr_token, redemption_status, redeemed_at",
+    )
     .eq("stripe_session_id", sessionId)
     .maybeSingle();
 

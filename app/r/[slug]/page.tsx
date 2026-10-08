@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getRestaurantBySlug, getClaimableDropsForRestaurant } from "@/lib/restaurants/db";
 import { formatTimeWindow, formatDate } from "@/lib/drops/helpers";
+import { appendTag, tagFromSearchParams } from "@/lib/attribution/tag";
 import RestaurantCapture from "./capture";
 import { DP } from "@/lib/theme/tokens";
 
@@ -22,10 +23,19 @@ const T = {
 
 export default async function RestaurantSmartUrlPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
+
+  // A smart URL is the most likely thing to be shared, so it is the most
+  // likely thing to carry a tag — and both of the paths below rebuild a
+  // destination from scratch, which would otherwise drop the query string
+  // before it ever reached /drop/[id]. An invalid tag normalizes to null
+  // and is simply not forwarded.
+  const tag = tagFromSearchParams(await searchParams);
 
   // Unknown / inactive restaurant → 404 (capture is reserved for a VALID
   // restaurant with zero claimable drops, never for a bogus slug).
@@ -34,9 +44,11 @@ export default async function RestaurantSmartUrlPage({
 
   const claimable = await getClaimableDropsForRestaurant(restaurant.id);
 
-  // State 2 — exactly one claimable drop → 307 redirect to it.
+  // State 2 — exactly one claimable drop → 307 redirect to it, carrying
+  // the tag. `next.config.ts` keeps Cache-Control: no-store on /r/:slug,
+  // so a CDN can never serve one visitor's tagged redirect to another.
   if (claimable.length === 1) {
-    redirect(`/drop/${claimable[0].id}`);
+    redirect(appendTag(`/drop/${claimable[0].id}`, tag));
   }
 
   // State 1 — zero claimable drops → capture state.
@@ -90,7 +102,7 @@ export default async function RestaurantSmartUrlPage({
           {claimable.map((drop) => (
             <a
               key={drop.id}
-              href={`/drop/${drop.id}`}
+              href={appendTag(`/drop/${drop.id}`, tag)}
               style={{
                 display: "block",
                 textDecoration: "none",

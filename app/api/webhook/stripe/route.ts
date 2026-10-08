@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { formatTimeWindow } from "@/lib/drops/helpers";
 import { getDropByIdForServer } from "@/lib/drops/db";
 import { normalizePhone } from "@/lib/phone";
+import { normalizeTag } from "@/lib/attribution/tag";
 import { randomUUID } from "crypto";
 
 // ── Lazy Stripe init — prevents crash if env var missing at module load ──
@@ -101,6 +102,12 @@ export async function POST(request: NextRequest) {
     const dropItemId = session.metadata?.drop_item_id;
     const quantity = parseInt(session.metadata?.quantity || "1") || 1;
 
+    // Defense in depth. The checkout API already normalized this before
+    // attaching it, but metadata is a value we handed out and got back, and
+    // this handler is reachable by anything that can produce a validly
+    // signed event. Normalizing again costs a regex.
+    const tag = normalizeTag(session.metadata?.tag);
+
     log("webhook_metadata", {
       phone,
       drop_item_id: dropItemId,
@@ -153,10 +160,12 @@ export async function POST(request: NextRequest) {
       total_spots: item.total_spots,
       drop_title: item.title,
       restaurant_name: item.restaurant_name,
+      tag,
     });
 
     // ── Call atomic RPC — handles idempotency, capacity check, and insert ──
-    const { data: rpcResult, error: rpcError } = await supabase.rpc("create_order_atomic", {
+    // Existing argument order is untouched; p_tag is appended.
+    const rpcArgs = {
       p_stripe_session_id: stripeSessionId,
       p_phone: phone,
       p_drop_item_id: dropItemId,
@@ -166,7 +175,39 @@ export async function POST(request: NextRequest) {
       p_quantity: quantity,
       p_qr_token: qrToken,
       p_total_spots: item.total_spots,
-    });
+      p_tag: tag,
+    };
+
+    let { data: rpcResult, error: rpcError } = await supabase.rpc(
+      "create_order_atomic",
+      rpcArgs,
+    );
+
+    // ── Deploy-order safety net ──────────────────────────────────────
+    // PostgREST resolves an RPC by its NAMED ARGUMENT SET. If this code
+    // reaches production before the migration that adds p_tag, every call
+    // above fails PGRST202 — and because this handler answers 200 on RPC
+    // failure (so Stripe stops retrying), that would mean a customer paid
+    // and no order row was ever created. Losing a paid order to protect an
+    // attribution field is the wrong trade in every direction, so fall back
+    // to the 9-argument signature and record that attribution was dropped.
+    //
+    // This costs one wasted round trip in a window that should not exist
+    // (the documented deploy order is SQL first). It is here because the
+    // cost of the window existing anyway is somebody's dinner.
+    if (rpcError?.code === "PGRST202") {
+      log("webhook_rpc_signature_fallback", {
+        stripe_session_id: stripeSessionId,
+        reason: "p_tag not present on create_order_atomic — apply the tag migration",
+        tag_dropped: tag !== null,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { p_tag: _dropped, ...legacyArgs } = rpcArgs;
+      ({ data: rpcResult, error: rpcError } = await supabase.rpc(
+        "create_order_atomic",
+        legacyArgs,
+      ));
+    }
 
     log("webhook_rpc_response", {
       stripe_session_id: stripeSessionId,

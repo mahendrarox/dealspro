@@ -38,7 +38,19 @@ function buildDirectionsUrl(item: DropItem): string | null {
   return null;
 }
 
-export default function DealClient({ initialItem }: { initialItem: DropItem }) {
+export default function DealClient({
+  initialItem,
+  tag = null,
+}: {
+  initialItem: DropItem;
+  /**
+   * Channel attribution, already normalized on the server. This component
+   * deliberately does NOT read the URL: the server hands the value down so
+   * there is no window between hydration and the tag being known in which a
+   * fast tap could produce an unattributed order.
+   */
+  tag?: string | null;
+}) {
   const item = initialItem;
 
   const [loading, setLoading] = useState(false);
@@ -120,7 +132,15 @@ export default function DealClient({ initialItem }: { initialItem: DropItem }) {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone || undefined, drop_item_id: item.id, quantity }),
+        // `tag` is omitted entirely when absent — the API treats a missing
+        // and an invalid tag identically, and sending `null` would only add
+        // a key for the server to throw away.
+        body: JSON.stringify({
+          phone: phone || undefined,
+          drop_item_id: item.id,
+          quantity,
+          ...(tag ? { tag } : {}),
+        }),
       });
       const data = await res.json();
       if (data.checkoutUrl) {

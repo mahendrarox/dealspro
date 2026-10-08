@@ -9,9 +9,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Token required" }, { status: 400 });
   }
 
+  // Explicit column list, not `*`. This row is returned verbatim to the
+  // browser below, so every column added to `orders` would otherwise be
+  // published to anyone holding a qr_token. `tag` is channel attribution —
+  // internal only — and is deliberately absent. The list matches the
+  // `Order` type the scanner renders (app/scan/page.tsx).
   const { data: order, error } = await supabase
     .from("orders")
-    .select("*")
+    .select(
+      "id, phone, drop_item_id, drop_title, restaurant_name, price_paid, quantity, status, redemption_status, qr_token, created_at, redeemed_at",
+    )
     .eq("qr_token", token)
     .single();
 
