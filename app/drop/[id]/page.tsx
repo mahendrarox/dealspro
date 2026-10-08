@@ -1,4 +1,5 @@
 import { getDropByIdForServer } from "@/lib/drops/db";
+import { tagFromSearchParams } from "@/lib/attribution/tag";
 import DealClient from "./client";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +9,22 @@ const T = {
   display: "'DM Sans', sans-serif",
 };
 
-export default async function DealPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DealPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
+
+  // Channel attribution is read HERE, on the server, and handed down as a
+  // prop. Reading it in the client on mount would leave a window in which
+  // the page is interactive but the tag is not yet known — short, but long
+  // enough for a fast tap on Reserve to produce an unattributed order.
+  // The page is already `force-dynamic`, so this costs nothing.
+  const tag = tagFromSearchParams(await searchParams);
+
   const item = await getDropByIdForServer(id);
 
   if (!item) {
@@ -40,5 +55,5 @@ export default async function DealPage({ params }: { params: Promise<{ id: strin
     );
   }
 
-  return <DealClient initialItem={item} />;
+  return <DealClient initialItem={item} tag={tag} />;
 }
