@@ -361,7 +361,10 @@ function testInvariants() {
   );
   check(
     "T4: a signature mismatch falls back rather than losing a paid order",
-    /PGRST202/.test(webhook) && /legacyArgs/.test(webhook),
+    // Delegated to lib/orders/create-order-rpc.ts, which is unit-tested
+    // below. What matters here is that the route routes through it.
+    /callCreateOrderAtomic\(/.test(webhook) &&
+      /@\/lib\/orders\/create-order-rpc/.test(webhook),
   );
 
   // ── T8: the tag never reaches a customer-facing response ──────────
@@ -446,9 +449,180 @@ function testInvariants() {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// 5. RPC SIGNATURE FALLBACK (unit, no database)
 // ═══════════════════════════════════════════════════════════════════════
 
-function main() {
+const {
+  callCreateOrderAtomic,
+  SIGNATURE_MISMATCH,
+  FALLBACK_REASON,
+} = require(path.resolve(__dirname, "../lib/orders/create-order-rpc.ts"));
+
+const ARGS = Object.freeze({
+  p_stripe_session_id: "cs_test_1",
+  p_phone: "+13105550000",
+  p_drop_item_id: "drop-1",
+  p_drop_title: "Title",
+  p_restaurant_name: "Restaurant",
+  p_price_paid: 12,
+  p_quantity: 1,
+  p_qr_token: "qr-1",
+  p_total_spots: 10,
+  p_tag: "ramesh",
+});
+
+/** Records every argument set it is called with, and replays scripted outcomes. */
+function recorder(outcomes) {
+  const calls = [];
+  const queue = [...outcomes];
+  return {
+    calls,
+    call: async (args) => {
+      calls.push(args);
+      return queue.shift() ?? { data: null, error: null };
+    },
+  };
+}
+
+async function testFallback() {
+  section("RPC fallback: a signature mismatch must never cost a paid order");
+
+  // ── Happy path: one call, p_tag included, no fallback ─────────────
+  {
+    const r = recorder([{ data: { status: "created", order_id: "o1" }, error: null }]);
+    const out = await callCreateOrderAtomic(r.call, { ...ARGS });
+    check("Fallback: a successful call happens exactly once", r.calls.length === 1);
+    check("Fallback: p_tag is sent on the first call", r.calls[0].p_tag === "ramesh");
+    check("Fallback: usedFallback is false", out.usedFallback === false);
+    check("Fallback: the result is passed through", out.data?.order_id === "o1");
+  }
+
+  // ── PGRST202: retry without p_tag ─────────────────────────────────
+  {
+    const r = recorder([
+      { data: null, error: { code: SIGNATURE_MISMATCH, message: "no function matches" } },
+      { data: { status: "created", order_id: "o2" }, error: null },
+    ]);
+    const seen = [];
+    const out = await callCreateOrderAtomic(r.call, { ...ARGS }, (i) => seen.push(i));
+
+    check("Fallback: PGRST202 triggers exactly one retry", r.calls.length === 2);
+    check("Fallback: the retry omits p_tag entirely", !("p_tag" in r.calls[1]));
+    check(
+      "Fallback: the retry keeps all nine original arguments",
+      Object.keys(r.calls[1]).length === 9 &&
+        ["p_stripe_session_id","p_phone","p_drop_item_id","p_drop_title","p_restaurant_name",
+         "p_price_paid","p_quantity","p_qr_token","p_total_spots"]
+          .every((k) => r.calls[1][k] === ARGS[k]),
+      JSON.stringify(Object.keys(r.calls[1])),
+    );
+    check(
+      "Fallback: the nine arguments keep their order",
+      JSON.stringify(Object.keys(r.calls[1])) ===
+        JSON.stringify(Object.keys(ARGS).filter((k) => k !== "p_tag")),
+    );
+    check("Fallback: the order IS created on the retry", out.data?.order_id === "o2");
+    check("Fallback: usedFallback is true", out.usedFallback === true);
+    check("Fallback: the error from the first call is not surfaced", out.error === null);
+    check("Fallback: the caller is told once", seen.length === 1);
+    check("Fallback: it is told the reason", seen[0]?.reason === FALLBACK_REASON);
+    check("Fallback: it is told a tag was dropped", seen[0]?.tagDropped === true);
+  }
+
+  // ── PGRST202 with no tag to lose ──────────────────────────────────
+  {
+    const r = recorder([
+      { data: null, error: { code: SIGNATURE_MISMATCH } },
+      { data: { status: "created" }, error: null },
+    ]);
+    const seen = [];
+    await callCreateOrderAtomic(r.call, { ...ARGS, p_tag: null }, (i) => seen.push(i));
+    check("Fallback: with p_tag null, tagDropped is false", seen[0]?.tagDropped === false);
+    check("Fallback: it still retries (the signature is still wrong)", r.calls.length === 2);
+  }
+
+  // ── Every OTHER error passes straight through ─────────────────────
+  for (const code of ["23505", "PGRST116", "42883", undefined]) {
+    const r = recorder([{ data: null, error: { code, message: "boom" } }]);
+    const out = await callCreateOrderAtomic(r.call, { ...ARGS });
+    check(
+      `Fallback: error code ${String(code)} is NOT retried`,
+      r.calls.length === 1 && out.usedFallback === false && out.error?.message === "boom",
+      `calls=${r.calls.length}`,
+    );
+  }
+
+  // ── A retry that also fails returns the SECOND error ──────────────
+  {
+    const r = recorder([
+      { data: null, error: { code: SIGNATURE_MISMATCH, message: "first" } },
+      { data: null, error: { code: "23505", message: "second" } },
+    ]);
+    const out = await callCreateOrderAtomic(r.call, { ...ARGS });
+    check(
+      "Fallback: a failing retry surfaces the retry's own error",
+      out.error?.message === "second" && out.usedFallback === true,
+    );
+  }
+
+  // ── It never retries twice ────────────────────────────────────────
+  {
+    const r = recorder([
+      { data: null, error: { code: SIGNATURE_MISMATCH } },
+      { data: null, error: { code: SIGNATURE_MISMATCH } },
+      { data: { status: "created" }, error: null },
+    ]);
+    const out = await callCreateOrderAtomic(r.call, { ...ARGS });
+    check(
+      "Fallback: it retries at most once, never loops",
+      r.calls.length === 2 && out.error?.code === SIGNATURE_MISMATCH,
+      `calls=${r.calls.length}`,
+    );
+  }
+
+  // ── The caller's arguments are not mutated ────────────────────────
+  {
+    const args = { ...ARGS };
+    const r = recorder([
+      { data: null, error: { code: SIGNATURE_MISMATCH } },
+      { data: { status: "created" }, error: null },
+    ]);
+    await callCreateOrderAtomic(r.call, args);
+    check(
+      "Fallback: the caller's argument object is left intact",
+      args.p_tag === "ramesh" && Object.keys(args).length === 10,
+    );
+  }
+
+  // ── The route uses the helper, not its own copy ───────────────────
+  const webhookSrc = read("app/api/webhook/stripe/route.ts");
+  check(
+    "Fallback: the webhook calls the extracted helper",
+    /callCreateOrderAtomic\(/.test(webhookSrc) &&
+      /@\/lib\/orders\/create-order-rpc/.test(webhookSrc),
+  );
+  check(
+    "Fallback: the webhook no longer carries an inline copy",
+    (() => {
+      // Comments stripped: the route explains in prose where the handling
+      // lives, and that sentence is not an implementation.
+      const code = webhookSrc
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\n]*/g, "");
+      return !/PGRST202/.test(code) && !/legacyArgs/.test(code);
+    })(),
+  );
+  check(
+    "Fallback: the log event name is unchanged",
+    /webhook_rpc_signature_fallback/.test(webhookSrc),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+
+async function main() {
   console.log("╔══════════════════════════════════════════════════╗");
   console.log("║   DealsPro · Channel attribution (?tag=)         ║");
   console.log("╚══════════════════════════════════════════════════╝");
@@ -458,6 +632,7 @@ function main() {
     testAppendTag();
     testRoundTrip();
     testInvariants();
+    await testFallback();
   } catch (err) {
     console.error("\n[FATAL] attribution suite crashed:", err);
     failed += 1;
