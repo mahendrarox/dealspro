@@ -15,6 +15,10 @@ export type AdminAction =
   | "create_intake_link"
   | "replace_intake_link"
   | "revoke_intake_link"
+  // Studio sharing. `drop_id` is null: a channel is not scoped to a drop.
+  | "create_share_channel"
+  | "rename_share_channel"
+  | "toggle_share_channel"
   | "publish_submission"
   | "reject_submission";
 

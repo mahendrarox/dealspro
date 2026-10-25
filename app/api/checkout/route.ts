@@ -6,6 +6,7 @@ import { normalizePhone } from "@/lib/phone";
 import { getSpotsInfo, CONFIRMED_STATUS } from "@/lib/spots";
 import { getDropByIdForServer, getDropRow } from "@/lib/drops/db";
 import { normalizeTag } from "@/lib/attribution/tag";
+import { recordCheckoutSession } from "@/lib/channels/events";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -163,6 +164,25 @@ export async function POST(request: NextRequest) {
     });
 
     console.log("[Checkout] Session created:", session.id);
+
+    // ── Channel instrumentation ─────────────────────────────────────
+    // Recorded only AFTER Stripe returned a session, so this counts
+    // sessions that exist — never button presses, and never a payment.
+    // Keyed on the session id, so a retried request for the same session
+    // cannot count twice.
+    //
+    // Awaited rather than floated: a floated promise in a serverless
+    // handler can be killed when the response is sent, which would make
+    // the count quietly lossy. `recordCheckoutSession` swallows all its
+    // own failures and returns a boolean, so this cannot throw and
+    // cannot fail the checkout — the customer's session is already
+    // created and the URL is already in hand.
+    await recordCheckoutSession({
+      dropItemId: drop_item_id,
+      tag,
+      sessionId: session.id,
+    });
+
     return NextResponse.json({ checkoutUrl: session.url });
   } catch (err) {
     console.error("[Checkout] unhandled:", err);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import type { DropItem } from "@/lib/drops/types";
 import {
   formatTimeWindow,
@@ -96,6 +96,41 @@ export default function DealClient({
   useEffect(() => {
     try { setPhone(localStorage.getItem("dp_phone") || ""); } catch { setPhone(""); }
   }, []);
+
+  // ── Visit beacon ────────────────────────────────────────────────
+  // Fires once, from the browser, AFTER this page has actually
+  // rendered — which is why it lives in an effect and not in the server
+  // component. A prefetch, a crawler fetch or an SSR pass never reaches
+  // here, so none of them is counted as a visit.
+  //
+  // This counts PAGE VIEWS. Not unique people, not reach, and not proof
+  // a human read anything. One id per mount makes a retry or a
+  // double-invoked effect a no-op at the database's unique index rather
+  // than a second visit.
+  const visitSent = useRef(false);
+  useEffect(() => {
+    if (visitSent.current) return;
+    visitSent.current = true;
+
+    let eventId: string;
+    try {
+      eventId = crypto.randomUUID();
+    } catch {
+      // No crypto (very old browser): skip rather than send something
+      // that could collide with another visitor's beacon.
+      return;
+    }
+
+    // keepalive so the beacon survives an immediate navigation away.
+    void fetch("/api/track/visit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dropItemId: item.id, tag, eventId }),
+      keepalive: true,
+    }).catch(() => {
+      /* Measurement must never disturb the page it measures. */
+    });
+  }, [item.id, tag]);
 
   // ── Derived state ──
   const remaining = spotsRemaining ?? item.total_spots;

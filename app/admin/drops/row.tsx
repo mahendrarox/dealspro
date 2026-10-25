@@ -2,6 +2,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toggleActive, toggleHero, archiveDrop } from "@/lib/admin/actions";
+import SharePanel from "./share-panel";
 
 const T = {
   panel: "#14141A",
@@ -105,7 +106,7 @@ export default function DropRow({ drop, archivedView = false }: DropRowProps) {
         display: "grid",
         gridTemplateColumns: archivedView
           ? "64px 1fr auto auto"
-          : "64px 1fr auto auto auto auto auto",
+          : "64px 1fr auto auto auto auto auto auto",
         alignItems: "center",
         gap: 16,
         opacity: drop.archived_at ? 0.85 : 1,
@@ -233,6 +234,8 @@ export default function DropRow({ drop, archivedView = false }: DropRowProps) {
           >
             Edit
           </a>
+
+          <SharePanel dropId={drop.id} dropTitle={drop.title} />
 
           <button
             onClick={() => { setError(null); setPhase("plain"); }}
