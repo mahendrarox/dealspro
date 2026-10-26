@@ -196,6 +196,14 @@ if (!applied.ok) {
   console.log(`\n${"═".repeat(54)}\n  TOTAL: ${passed} PASS / ${failed} FAIL\n${"═".repeat(54)}\n`);
   process.exit(1);
 }
+// Captured HERE, before any test records anything. Asserting this later
+// would be vacuous — by then the suite has written events of its own,
+// and resetting the column first would only prove the reset worked.
+const STAMP_AFTER_MIGRATION = one(
+  `SELECT coalesce(first_event_at::text, 'NULL') FROM channel_instrumentation;`,
+);
+const EVENTS_AFTER_MIGRATION = one(`SELECT count(*)::text FROM channel_events;`);
+
 const again = sql(fs.readFileSync(MIGRATION, "utf8"));
 check("migration is safe to re-run (idempotent)", again.ok, again.out.slice(0, 300));
 check(
@@ -479,6 +487,334 @@ check(
          AND column_name IN ('total_spots','spots_remaining','allocation')
          AND table_name IN ('share_channels','channel_events');`) === "0",
 );
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// CODE IMMUTABILITY — THE DATABASE REFUSES, NOT JUST THE APPLICATION
+// ═══════════════════════════════════════════════════════════════════════
+
+section("share_channels.code is write-once in the database");
+
+sql(`INSERT INTO share_channels (code, label, created_by)
+     VALUES ('wo-test', 'Write Once', 'test@dealspro');`);
+
+check(
+  "the row exists to be tested",
+  one(`SELECT count(*)::text FROM share_channels WHERE code='wo-test';`) === "1",
+);
+check(
+  "UPDATE of code is REJECTED by the database",
+  rejects(`UPDATE share_channels SET code='wo-changed' WHERE code='wo-test';`, "write-once"),
+  "the database accepted a code rewrite",
+);
+check(
+  "…and the code is unchanged after the rejection",
+  one(`SELECT code FROM share_channels WHERE label='Write Once';`) === "wo-test",
+);
+check(
+  "the rejection is a check_violation (23514), not a bare error",
+  one(`DO $$
+       BEGIN
+         UPDATE share_channels SET code='x' WHERE code='wo-test';
+         RAISE NOTICE 'NOT-REJECTED';
+       EXCEPTION WHEN check_violation THEN
+         RAISE NOTICE '23514';
+       END $$;`) === "" ||
+    sql(`DO $$
+         BEGIN
+           UPDATE share_channels SET code='x' WHERE code='wo-test';
+         EXCEPTION WHEN check_violation THEN
+           NULL;
+         END $$;`).ok,
+  "the error cannot be caught as a check_violation",
+);
+check(
+  "a bulk UPDATE touching every row is rejected too",
+  rejects(`UPDATE share_channels SET code = code || '-x';`, "write-once"),
+  "a set-wide rewrite slipped past the trigger",
+);
+check(
+  "renaming the LABEL still works",
+  sql(`UPDATE share_channels SET label='Renamed' WHERE code='wo-test';`).ok &&
+    one(`SELECT label FROM share_channels WHERE code='wo-test';`) === "Renamed",
+  "the trigger blocks legitimate renames",
+);
+check(
+  "…and the rename left the code alone",
+  one(`SELECT code FROM share_channels WHERE label='Renamed';`) === "wo-test",
+);
+check(
+  "an UPDATE that re-states the same code is allowed (no false positive)",
+  sql(`UPDATE share_channels SET code='wo-test', label='Same Code'
+       WHERE code='wo-test';`).ok,
+  "IS DISTINCT FROM is not being used",
+);
+
+// ═══════════════════════════════════════════════════════════════════════
+// FIRST RECORDED ACTIVITY — SET ATOMICALLY, BY THE FIRST EVENT
+// ═══════════════════════════════════════════════════════════════════════
+
+section("first_event_at is first ACTIVITY, not migration time");
+
+// Asserted against the state captured immediately after the migration
+// ran, NOT against a value this section just reset — that would prove
+// nothing about the migration at all.
+check(
+  "applying the migration records no events",
+  EVENTS_AFTER_MIGRATION === "0",
+  `found ${EVENTS_AFTER_MIGRATION} event(s) straight after applying`,
+);
+check(
+  "after applying the migration, nothing is claimed",
+  STAMP_AFTER_MIGRATION === "NULL",
+  `the migration stamped ${STAMP_AFTER_MIGRATION}, a time it could not have observed`,
+);
+
+// From here the section drives the function itself, so it starts clean.
+sql(`DELETE FROM channel_events;
+     UPDATE channel_instrumentation SET first_event_at = NULL;`);
+check(
+  "the column permits NULL",
+  one(`SELECT is_nullable FROM information_schema.columns
+       WHERE table_schema='public' AND table_name='channel_instrumentation'
+         AND column_name='first_event_at';`) === "YES",
+);
+check(
+  "the column has no default",
+  one(`SELECT coalesce(column_default,'NONE') FROM information_schema.columns
+       WHERE table_schema='public' AND table_name='channel_instrumentation'
+         AND column_name='first_event_at';`) === "NONE",
+  "a default would stamp apply time on the next fresh install",
+);
+
+// The first event sets it, in the same statement.
+const firstResult = one(
+  `SELECT record_channel_event('visit', 'drop-1', 'ramesh', 'visit:first-ever');`,
+);
+check("the first event is recorded", firstResult === "recorded", firstResult);
+check(
+  "the first event sets first_event_at",
+  one(`SELECT coalesce(first_event_at::text,'NULL') FROM channel_instrumentation;`) !== "NULL",
+  "a recorded event left no recorded start",
+);
+check(
+  "first_event_at EQUALS the first event's own timestamp",
+  one(`SELECT (ci.first_event_at = (SELECT min(created_at) FROM channel_events))::text
+       FROM channel_instrumentation ci;`) === "true",
+  "the stamp and the event it marks disagree",
+);
+
+// A later event must not move it.
+const stampAfterFirst = one(`SELECT first_event_at::text FROM channel_instrumentation;`);
+sql(`SELECT pg_sleep(0.05);`);
+one(`SELECT record_channel_event('copy', 'drop-1', 'ramesh', 'copy:second');`);
+check(
+  "a later event does NOT move first_event_at",
+  one(`SELECT first_event_at::text FROM channel_instrumentation;`) === stampAfterFirst,
+  "the first recorded activity was overwritten",
+);
+
+// Atomicity: a rejected insert must leave no stamp behind.
+sql(`DELETE FROM channel_events;
+     UPDATE channel_instrumentation SET first_event_at = NULL;`);
+const badResult = sql(
+  `SELECT record_channel_event('not_a_type', 'drop-1', 'ramesh', 'dedupe-bad-type');`,
+);
+check(
+  "an invalid event type is rejected",
+  !badResult.ok,
+  "the CHECK constraint did not fire",
+);
+check(
+  "a rejected event leaves first_event_at NULL (atomic)",
+  one(`SELECT coalesce(first_event_at::text,'NULL') FROM channel_instrumentation;`) === "NULL",
+  "a failed insert still stamped a start time",
+);
+check(
+  "…and leaves no event row behind",
+  one(`SELECT count(*)::text FROM channel_events;`) === "0",
+);
+
+// Deduplication through the function.
+one(`SELECT record_channel_event('visit', 'drop-1', 'ramesh', 'visit:dedupe-me');`);
+const second = one(`SELECT record_channel_event('visit', 'drop-1', 'ramesh', 'visit:dedupe-me');`);
+check(
+  "a replayed event returns 'duplicate', not an error",
+  second === "duplicate",
+  second,
+);
+check(
+  "…and inserts no second row",
+  one(`SELECT count(*)::text FROM channel_events WHERE dedupe_key='visit:dedupe-me';`) === "1",
+);
+check(
+  "a duplicate does not move first_event_at either",
+  one(`SELECT (ci.first_event_at = (SELECT min(created_at) FROM channel_events))::text
+       FROM channel_instrumentation ci;`) === "true",
+);
+
+// The migration is idempotent and corrects an apply-time stamp.
+sql(`UPDATE channel_instrumentation
+     SET first_event_at = (SELECT min(created_at) FROM channel_events) - interval '3 days';`);
+const reapply = sql(`\\i ${MIGRATION.replace(/\\/g, "/")}`);
+check(
+  "re-applying the migration succeeds (idempotent)",
+  reapply.ok,
+  reapply.out.split("\n").slice(-3).join(" | "),
+);
+check(
+  "re-applying CORRECTS a stamp that predates the first event",
+  one(`SELECT (ci.first_event_at = (SELECT min(created_at) FROM channel_events))::text
+       FROM channel_instrumentation ci;`) === "true",
+  "an apply-time stamp survived re-application",
+);
+
+// ═══════════════════════════════════════════════════════════════════════
+// HISTORICAL TAGS ARE VISIBLE TO CODE GENERATION
+// ═══════════════════════════════════════════════════════════════════════
+
+section("channel_tags_in_use exposes unregistered tags");
+
+sql(`INSERT INTO orders (drop_item_id, drop_title, restaurant_name, price_paid,
+                         status, qr_token, quantity, tag)
+     VALUES ('drop-1','T','R',39,'paid','qr-hist-1',1,'ghost-partner');`);
+
+const inUse = one(`SELECT string_agg(tag, ',' ORDER BY tag) FROM channel_tags_in_use();`);
+check(
+  "a tag that exists only in orders is reported",
+  inUse.includes("ghost-partner"),
+  `got: ${inUse}`,
+);
+check(
+  "a tag that exists only in events is reported",
+  inUse.includes("ramesh"),
+  `got: ${inUse}`,
+);
+check(
+  "no channel is registered for the historical tag",
+  one(`SELECT count(*)::text FROM share_channels WHERE code='ghost-partner';`) === "0",
+  "the fixture does not test what it claims to",
+);
+check(
+  "the function returns DISTINCT values",
+  (() => {
+    sql(`INSERT INTO orders (drop_item_id, drop_title, restaurant_name, price_paid,
+                             status, qr_token, quantity, tag)
+         VALUES ('drop-1','T','R',39,'paid','qr-hist-2',1,'ghost-partner');`);
+    const tags = one(`SELECT string_agg(tag, ',' ORDER BY tag) FROM channel_tags_in_use();`)
+      .split(",")
+      .filter(Boolean);
+    return new Set(tags).size === tags.length;
+  })(),
+  "duplicate tags would bloat the taken-set",
+);
+check(
+  "the function is STABLE, so it cannot write",
+  one(`SELECT provolatile::text FROM pg_proc WHERE proname='channel_tags_in_use';`) === "s",
+);
+check(
+  "neither new function is executable by a browser role",
+  one(`SELECT count(*)::text FROM pg_proc p
+       WHERE p.proname IN ('record_channel_event','channel_tags_in_use')
+         AND (has_function_privilege('anon', p.oid, 'EXECUTE')
+           OR has_function_privilege('authenticated', p.oid, 'EXECUTE'));`) === "0",
+  "a browser role can call a tracking function directly",
+);
+
+// ═══════════════════════════════════════════════════════════════════════
+// PAGINATION AGAINST REAL ROWS
+// ═══════════════════════════════════════════════════════════════════════
+
+section("Reads cover every row, in a deterministic order");
+
+// 2,300 orders on one drop: more than PostgREST's default page.
+sql(`INSERT INTO orders (drop_item_id, drop_title, restaurant_name, price_paid,
+                         status, qr_token, quantity, tag)
+     SELECT 'drop-page', 'T', 'R', 10, 'paid', 'qr-page-' || g, 1,
+            CASE WHEN g % 2 = 0 THEN 'ramesh' ELSE 'frisco-whatsapp' END
+     FROM generate_series(1, 2300) g;`);
+
+check(
+  "the fixture exceeds one default page",
+  Number(one(`SELECT count(*)::text FROM orders WHERE drop_item_id='drop-page';`)) === 2300,
+);
+check(
+  "ordering by id is a total order (no ties to page across)",
+  one(`SELECT count(*)::text FROM (
+         SELECT id FROM orders WHERE drop_item_id='drop-page'
+         GROUP BY id HAVING count(*) > 1) x;`) === "0",
+  "the paging key is not unique, so rows can repeat or vanish",
+);
+check(
+  "walking id-ordered pages of 1000 returns every row exactly once",
+  (() => {
+    const seen = [];
+    for (let from = 0; from < 4000; from += 1000) {
+      const page = one(
+        `SELECT string_agg(id::text, ',') FROM (
+           SELECT id FROM orders WHERE drop_item_id='drop-page'
+           ORDER BY id ASC OFFSET ${from} LIMIT 1000) p;`,
+      );
+      if (!page) break;
+      seen.push(...page.split(","));
+    }
+    return seen.length === 2300 && new Set(seen).size === 2300;
+  })(),
+  "paged reads lost or repeated rows",
+);
+check(
+  "the per-tag sums over all pages reconcile with the whole table",
+  one(`SELECT (
+         (SELECT coalesce(sum(price_paid),0) FROM orders WHERE drop_item_id='drop-page') =
+         (SELECT coalesce(sum(s),0) FROM (
+            SELECT sum(price_paid) s FROM orders
+            WHERE drop_item_id='drop-page' GROUP BY tag) x)
+       )::text;`) === "true",
+  "a capped read would understate the total",
+);
+
+// ═══════════════════════════════════════════════════════════════════════
+// A SLOW WRITE IS ABANDONED, NOT WAITED OUT
+// ═══════════════════════════════════════════════════════════════════════
+
+section("A slow analytics write cannot hold up a caller");
+
+// A deliberately slow stand-in, created for this test only. It is NOT
+// part of the migration.
+sql(`CREATE OR REPLACE FUNCTION slow_event_stub() RETURNS text
+     LANGUAGE plpgsql AS $$
+     BEGIN
+       PERFORM pg_sleep(5);
+       RETURN 'recorded';
+     END $$;`);
+
+check(
+  "the slow stub really is slow",
+  (() => {
+    const t0 = Date.now();
+    sql(`SELECT slow_event_stub();`);
+    return Date.now() - t0 >= 4500;
+  })(),
+  "the fixture does not reproduce a slow write",
+);
+
+check(
+  "a statement_timeout aborts a hung write rather than waiting",
+  (() => {
+    const t0 = Date.now();
+    const r = sql(`SET statement_timeout = '200ms'; SELECT slow_event_stub();`);
+    const elapsed = Date.now() - t0;
+    return !r.ok && elapsed < 3000;
+  })(),
+  "the database kept the caller waiting past its deadline",
+);
+
+check(
+  "aborting the write leaves no partial row behind",
+  one(`SELECT count(*)::text FROM channel_events WHERE dedupe_key='never-written';`) === "0",
+);
+
+sql(`DROP FUNCTION IF EXISTS slow_event_stub();`);
 
 console.log(`\n${"═".repeat(54)}`);
 console.log(`  TOTAL: ${passed} PASS / ${failed} FAIL`);

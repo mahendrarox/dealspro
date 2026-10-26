@@ -13,10 +13,15 @@
 --                                label, active flag.
 --   2. channel_events          — link copies, page visits and created
 --                                Stripe checkout sessions, deduplicated.
---   3. channel_instrumentation — one row recording when measurement
---                                began, so the UI can say "measured
---                                since" instead of showing a missing
+--   3. channel_instrumentation — one row recording the FIRST RECORDED
+--                                ACTIVITY, so the UI can name a real
+--                                instant instead of showing a missing
 --                                past as zero.
+--   4. record_channel_event()  — inserts one event and initializes that
+--                                timestamp in the SAME transaction.
+--   5. channel_tags_in_use()   — the tags already present in the data,
+--                                so a new channel cannot be handed a
+--                                code that a historical tag already owns.
 --
 -- Nothing existing is touched. No column, constraint, index, policy,
 -- grant or row on `orders`, `drop_items`, `restaurants`, `users` or any
@@ -31,6 +36,20 @@
 -- `orders.tag` to this table — a tag that predates the registry, or
 -- whose channel was never registered, must still report under its own
 -- recorded code.
+--
+-- ─── WHY THE TIMESTAMP IS "FIRST RECORDED ACTIVITY" ─────────────────
+-- An earlier revision of this file stamped the timestamp with now() at
+-- APPLY time and called it the start of measurement. That was wrong.
+-- This file is applied before the code that records anything is
+-- deployed, so every hour between the two would have been presented as
+-- measured and empty — a fabricated zero across real activity.
+--
+-- The column is therefore NULL until the first event is actually
+-- recorded, and record_channel_event() sets it in the same transaction
+-- as that insert. It is not the deployment instant and not the instant
+-- tracking became able to run: it is the first activity that was
+-- actually captured, which is the only one of the three this database
+-- can observe. The UI must label it as exactly that.
 --
 -- ─── WHY channel_events IS SEPARATE FROM orders ─────────────────────
 -- A copy, a visit and a created checkout session are not orders and must
@@ -121,6 +140,34 @@ BEFORE UPDATE ON share_channels
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
+-- Write-once, enforced HERE rather than trusted to the application.
+-- The application never writes `code` on update, but a console session,
+-- a future action or a later migration could. `orders.tag` stores this
+-- string, so rewriting it would silently detach every live link and
+-- every historical order carrying it — the one change this schema must
+-- make impossible rather than merely discourage.
+CREATE OR REPLACE FUNCTION share_channels_code_write_once()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $dp013_woc$
+BEGIN
+  IF NEW.code IS DISTINCT FROM OLD.code THEN
+    RAISE EXCEPTION
+      'share_channels.code is write-once: % cannot become %. '
+      'Renaming a channel edits label only.',
+      OLD.code, NEW.code
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END
+$dp013_woc$;
+
+DROP TRIGGER IF EXISTS share_channels_code_write_once ON share_channels;
+CREATE TRIGGER share_channels_code_write_once
+BEFORE UPDATE ON share_channels
+FOR EACH ROW
+EXECUTE FUNCTION share_channels_code_write_once();
+
 -- ─── 2. Channel events ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS channel_events (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -167,23 +214,138 @@ COMMENT ON TABLE channel_events IS
   'channel. Contains no customer data: no phone, no qr_token, no payment '
   'secret. Never joined row-for-row to orders.';
 
--- ─── 3. When measurement began ──────────────────────────────────────
+-- ─── 3. First recorded activity ─────────────────────────────────────
 -- Without this, an empty events table is indistinguishable from "this
 -- was never measured", and the UI would be free to render a missing past
 -- as a confident zero.
+--
+-- NULL until something is actually recorded. See the header: a timestamp
+-- written when this file is APPLIED would claim measurement over the
+-- window before the code deployed.
 CREATE TABLE IF NOT EXISTS channel_instrumentation (
-  id         boolean PRIMARY KEY DEFAULT true,
-  started_at timestamptz NOT NULL DEFAULT now(),
+  id             boolean PRIMARY KEY DEFAULT true,
+  first_event_at timestamptz,
   CONSTRAINT channel_instrumentation_single_row CHECK (id)
 );
+
+-- Convert a table left by the earlier revision of this file, which had
+-- `started_at timestamptz NOT NULL DEFAULT now()`. Idempotent: on a
+-- fresh install every branch below is a no-op.
+DO $dp013_inst$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = 'channel_instrumentation'
+      AND column_name  = 'started_at'
+  ) THEN
+    ALTER TABLE channel_instrumentation RENAME COLUMN started_at TO first_event_at;
+  END IF;
+
+  ALTER TABLE channel_instrumentation ALTER COLUMN first_event_at DROP NOT NULL;
+  ALTER TABLE channel_instrumentation ALTER COLUMN first_event_at DROP DEFAULT;
+END
+$dp013_inst$;
 
 INSERT INTO channel_instrumentation (id) VALUES (true)
 ON CONFLICT (id) DO NOTHING;
 
-COMMENT ON TABLE channel_instrumentation IS
-  'Single row. started_at is the instant copies/visits/checkout sessions '
-  'began being recorded. Counts before it do not exist and must never be '
-  'displayed as zero.';
+-- A stamp earlier than the earliest event that exists cannot be "first
+-- recorded activity" — it is an apply-time stamp. Replace it with the
+-- truth, which is NULL when nothing has been recorded at all.
+UPDATE channel_instrumentation ci
+   SET first_event_at = (SELECT min(created_at) FROM channel_events)
+ WHERE ci.first_event_at IS NOT NULL
+   AND ci.first_event_at < COALESCE(
+         (SELECT min(created_at) FROM channel_events),
+         'infinity'::timestamptz);
+
+COMMENT ON COLUMN channel_instrumentation.first_event_at IS
+  'The first copy/visit/checkout-session actually RECORDED. NULL until '
+  'one is. Not the deployment instant and not the instant tracking '
+  'became able to run — neither is observable here. Nothing before it '
+  'was measured, and must never be displayed as zero.';
+
+-- ─── 4. Recording an event ──────────────────────────────────────────
+-- One statement for the caller, one transaction in the database: the
+-- insert and the initialization of first_event_at either both happen or
+-- neither does. That is why this is a function and not two round trips
+-- — a fire-and-forget second write could be lost, leaving a recorded
+-- event with no recorded start.
+--
+-- Returns 'recorded' or 'duplicate'. A duplicate dedupe_key is SUCCESS,
+-- not an error: it is how a retried beacon, a double-invoked effect or a
+-- replayed request is made a no-op rather than an inflated count.
+CREATE OR REPLACE FUNCTION record_channel_event(
+  p_event_type   text,
+  p_drop_item_id text,
+  p_tag          text,
+  p_dedupe_key   text
+)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $dp013_rec$
+DECLARE
+  v_at timestamptz := now();
+BEGIN
+  INSERT INTO channel_events (event_type, drop_item_id, tag, dedupe_key, created_at)
+  VALUES (p_event_type, p_drop_item_id, p_tag, p_dedupe_key, v_at);
+
+  -- Same transaction. Only ever written once: the guard makes a second
+  -- event leave the first one's timestamp alone.
+  UPDATE channel_instrumentation
+     SET first_event_at = v_at
+   WHERE id = true AND first_event_at IS NULL;
+
+  RETURN 'recorded';
+EXCEPTION
+  WHEN unique_violation THEN
+    RETURN 'duplicate';
+END
+$dp013_rec$;
+
+-- ─── 5. Tags already present in the data ────────────────────────────
+-- A historical tag that no channel ever registered still owns its code.
+-- Creating a channel whose code collided with one would silently hand
+-- that channel every past order carrying it. The registry alone cannot
+-- see those tags, so this exposes them.
+--
+-- Read-only and STABLE. Returns codes only — no order, no customer, no
+-- amount, nothing identifying.
+CREATE OR REPLACE FUNCTION channel_tags_in_use()
+RETURNS TABLE (tag text)
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+AS $dp013_tiu$
+  SELECT DISTINCT o.tag FROM orders o WHERE o.tag IS NOT NULL
+  UNION
+  SELECT DISTINCT e.tag FROM channel_events e WHERE e.tag IS NOT NULL
+$dp013_tiu$;
+
+-- Neither function is reachable from a browser role. Both run behind the
+-- service-role client, which is behind requireAdmin() or behind the
+-- server-side recorder. Guarded because a role may not exist on a
+-- throwaway cluster.
+DO $dp013_fnacl$
+DECLARE
+  r text;
+BEGIN
+  EXECUTE 'REVOKE ALL ON FUNCTION record_channel_event(text, text, text, text) FROM PUBLIC';
+  EXECUTE 'REVOKE ALL ON FUNCTION channel_tags_in_use() FROM PUBLIC';
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION record_channel_event(text, text, text, text) FROM %I', r);
+      EXECUTE format('REVOKE ALL ON FUNCTION channel_tags_in_use() FROM %I', r);
+    END IF;
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION record_channel_event(text, text, text, text) TO service_role';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION channel_tags_in_use() TO service_role';
+  END IF;
+END
+$dp013_fnacl$;
 
 -- ─── Privileges: deny-all to browser roles ──────────────────────────
 -- Same posture as drop_submissions and intake_links: RLS on, zero
@@ -258,12 +420,48 @@ WHERE schemaname = 'public'
   AND indexname IN ('uq_share_channels_code', 'uq_channel_events_dedupe')
 ORDER BY indexname;
 
--- E. Instrumentation start recorded, exactly one row.
-SELECT count(*) AS rows, min(started_at) AS measurement_began,
-       CASE WHEN count(*) = 1 THEN 'PASS' ELSE 'FAIL — expected exactly one row' END AS verdict
+-- E. Exactly one instrumentation row, and it does NOT claim activity
+--    that predates the first recorded event. On a fresh apply
+--    first_event_at is NULL — that is correct, not a failure: nothing
+--    has been recorded yet, and the UI must say so rather than show a
+--    zero.
+SELECT count(*) AS rows,
+       min(first_event_at) AS first_recorded_activity,
+       (SELECT min(created_at) FROM channel_events) AS earliest_event,
+       CASE
+         WHEN count(*) <> 1 THEN 'FAIL — expected exactly one row'
+         WHEN min(first_event_at) IS NULL
+          AND NOT EXISTS (SELECT 1 FROM channel_events)
+              THEN 'PASS — nothing recorded yet, nothing claimed'
+         WHEN min(first_event_at) = (SELECT min(created_at) FROM channel_events)
+              THEN 'PASS — matches the earliest recorded event'
+         ELSE 'FAIL — timestamp does not match the first recorded event'
+       END AS verdict
 FROM channel_instrumentation;
 
--- F. Nothing existing was disturbed: orders still has its own indexes.
+-- F. The write-once trigger on share_channels.code is installed.
+-- tgenabled is type "char", which has no unambiguous || operator
+-- against an untyped literal. Cast it explicitly or this query errors.
+SELECT tgname,
+       CASE WHEN tgenabled = 'O' THEN 'PASS — enabled'
+            ELSE 'FAIL — disabled (' || tgenabled::text || ')' END AS verdict
+FROM pg_trigger
+WHERE tgrelid = 'public.share_channels'::regclass
+  AND tgname = 'share_channels_code_write_once';
+
+-- G. Both functions exist, and no browser role can execute either.
+--    Expect two PASS rows.
+SELECT p.proname,
+       CASE WHEN has_function_privilege('anon', p.oid, 'EXECUTE')
+              OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+            THEN 'FAIL — a browser role can execute this'
+            ELSE 'PASS — service-role only' END AS verdict
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
+WHERE p.proname IN ('record_channel_event', 'channel_tags_in_use')
+ORDER BY p.proname;
+
+-- H. Nothing existing was disturbed: orders still has its own indexes.
 SELECT indexname FROM pg_indexes
 WHERE schemaname = 'public' AND tablename = 'orders'
 ORDER BY indexname;

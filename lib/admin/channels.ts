@@ -17,8 +17,9 @@ import {
   MAX_PAGES,
   PAGE_SIZE,
 } from "@/lib/channels/constants";
+import { walkPages, type WalkResult } from "@/lib/channels/paginate";
 import {
-  instrumentationStartedAt,
+  firstRecordedActivityAt,
   isMissingEventsTable,
   recordCopy,
 } from "@/lib/channels/events";
@@ -69,30 +70,42 @@ const CHANNEL_COLS = "id, code, label, is_active, created_at";
  * read is silently wrong in exactly the direction that flatters it. This
  * walks `.range()` until a short page arrives.
  */
+type ReadAllResult<T> = WalkResult<T>;
+
+/**
+ * Every matching row, ordered deterministically, or an honest admission
+ * that the cap was hit.
+ *
+ * `orderBy` must be a UNIQUE column. `id` on every table read here is,
+ * and that is what makes paging safe — see lib/channels/paginate.
+ */
 async function readAll<T>(
   table: string,
   columns: string,
-  filterColumn: string,
-  filterValue: string,
-): Promise<{ rows: T[]; missingTable: boolean; error: string | null }> {
-  const rows: T[] = [];
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const from = page * PAGE_SIZE;
-    const { data, error } = await adminDb
-      .from(table)
-      .select(columns)
-      .eq(filterColumn, filterValue)
-      .range(from, from + PAGE_SIZE - 1);
+  filter: { column: string; value: string } | null,
+  orderBy = "id",
+): Promise<ReadAllResult<T>> {
+  return walkPages<T>(
+    async (from, to) => {
+      let query = adminDb.from(table).select(columns);
+      if (filter) query = query.eq(filter.column, filter.value);
 
-    if (error) {
-      if (isMissingEventsTable(error)) return { rows, missingTable: true, error: null };
-      return { rows, missingTable: false, error: error.message };
-    }
-    const batch = (data ?? []) as unknown as T[];
-    rows.push(...batch);
-    if (batch.length < PAGE_SIZE) break;
-  }
-  return { rows, missingTable: false, error: null };
+      const { data, error } = await query
+        .order(orderBy, { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        return {
+          ok: false,
+          missingTable: isMissingEventsTable(error),
+          error: error.message,
+        };
+      }
+      return { ok: true, rows: (data ?? []) as unknown as T[] };
+    },
+    PAGE_SIZE,
+    MAX_PAGES,
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -100,7 +113,13 @@ async function readAll<T>(
 // ═══════════════════════════════════════════════════════════════════════
 
 export type ListChannelsResult =
-  | { ok: true; channels: Channel[]; migrationMissing: boolean }
+  | {
+      ok: true;
+      channels: Channel[];
+      migrationMissing: boolean;
+      /** The safety cap was reached: this list is NOT every channel. */
+      truncated: boolean;
+    }
   | { ok: false; error: string };
 
 /** Every channel, active and retired. Admin only. */
@@ -111,30 +130,86 @@ export async function listChannels(): Promise<ListChannelsResult> {
     return { ok: false, error: "Unauthorized" };
   }
 
-  const { data, error } = await adminDb
-    .from("share_channels")
-    .select(CHANNEL_COLS)
-    .order("is_active", { ascending: false })
-    .order("label", { ascending: true });
+  // Paginated like every other read here. The registry is small today
+  // and a capped read would look identical to a complete one — which is
+  // exactly the failure mode worth not having.
+  const read = await readAll<Record<string, unknown>>(
+    "share_channels",
+    CHANNEL_COLS,
+    null,
+  );
 
-  if (error) {
-    if (isMissingEventsTable(error)) {
-      return { ok: true, channels: [], migrationMissing: true };
-    }
-    console.error("[admin/channels] listChannels failed:", error.message);
+  if (read.missingTable) {
+    return { ok: true, channels: [], migrationMissing: true, truncated: false };
+  }
+  if (read.error) {
+    console.error("[admin/channels] listChannels failed:", read.error);
     return { ok: false, error: "Could not load channels" };
   }
+
+  // Sorted here rather than in the query: a paginated read must be
+  // ordered by a unique key to page correctly, so display order is
+  // applied once the whole set is in hand.
+  const channels = read.rows
+    .map((r) => toChannel(r))
+    .sort(
+      (a, b) =>
+        Number(b.isActive) - Number(a.isActive) ||
+        a.label.localeCompare(b.label),
+    );
 
   return {
     ok: true,
     migrationMissing: false,
-    channels: (data ?? []).map((r) => toChannel(r as Record<string, unknown>)),
+    truncated: read.truncated,
+    channels,
   };
 }
 
 export type ChannelMutationResult =
-  | { ok: true; channel: Channel }
+  | {
+      ok: true;
+      channel: Channel;
+      /** Shown when the generated code had to step around a tag already in use. */
+      notice?: string;
+    }
   | { ok: false; error: string };
+
+/**
+ * Every tag already present in the data, registered or not.
+ *
+ * Served by `channel_tags_in_use()` — a DISTINCT union across orders and
+ * events, which PostgREST cannot express and which must not be done by
+ * reading every order into memory to find a handful of strings.
+ *
+ * A failure here is NOT survivable: generating a code against a set we
+ * could not read is how a channel silently absorbs someone else's
+ * history. The caller refuses rather than guesses.
+ */
+async function tagsInUse(): Promise<
+  { ok: true; tags: string[] } | { ok: false; error: string }
+> {
+  const { data, error } = await adminDb.rpc("channel_tags_in_use");
+
+  if (error) {
+    if (isMissingEventsTable(error)) {
+      return { ok: false, error: CHANNELS_MIGRATION_REQUIRED };
+    }
+    console.error("[admin/channels] channel_tags_in_use failed:", error.message);
+    return {
+      ok: false,
+      error:
+        "Could not check which link codes are already in use, so no " +
+        "channel was created. Try again.",
+    };
+  }
+
+  const rows = (data ?? []) as Array<{ tag: string } | string>;
+  const tags = rows
+    .map((r) => (typeof r === "string" ? r : r?.tag))
+    .filter((t): t is string => typeof t === "string" && t.length > 0);
+  return { ok: true, tags };
+}
 
 /**
  * Create a channel from a display name.
@@ -146,6 +221,15 @@ export type ChannelMutationResult =
  * The read-then-resolve is racy by nature, so the unique index is the
  * real guarantee: a lost race surfaces as 23505 and is retried once
  * against the newly-taken set.
+ *
+ * THE TAKEN SET IS NOT JUST THE REGISTRY. A tag can exist in the data
+ * with no channel behind it — a link shared before this feature, or one
+ * whose channel was never registered. Those tags own their codes. If a
+ * new channel were allowed to take one, it would absorb every
+ * historical order carrying it on the very next render, with no prompt
+ * and no trace. So `channel_tags_in_use()` is consulted too, the
+ * generated code steps around anything already in use, and the operator
+ * is TOLD — silently renaming their channel is its own small lie.
  */
 export async function createChannel(label: string): Promise<ChannelMutationResult> {
   let admin: { email: string };
@@ -160,19 +244,51 @@ export async function createChannel(label: string): Promise<ChannelMutationResul
   if (trimmed.length > 120) return { ok: false, error: "That name is too long (120 characters max)" };
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const existing = await adminDb.from("share_channels").select("code");
+    const existing = await readAll<{ code: string }>(
+      "share_channels",
+      "code",
+      null,
+    );
+    if (existing.missingTable) {
+      return { ok: false, error: CHANNELS_MIGRATION_REQUIRED };
+    }
     if (existing.error) {
-      if (isMissingEventsTable(existing.error)) {
-        return { ok: false, error: CHANNELS_MIGRATION_REQUIRED };
-      }
       return { ok: false, error: "Could not load existing channels" };
     }
+    if (existing.truncated) {
+      // Generating against a partial set could hand out a code another
+      // channel already holds. Refusing is the only safe answer.
+      return {
+        ok: false,
+        error:
+          "There are too many channels to check for a free code safely. " +
+          "Retire some before adding more.",
+      };
+    }
 
-    const taken = (existing.data ?? []).map((r) => String((r as { code: string }).code));
+    // Tags already present in orders or events, registered or not.
+    const inUse = await tagsInUse();
+    if (!inUse.ok) {
+      return { ok: false, error: inUse.error };
+    }
+
+    const registryCodes = existing.rows.map((r) => String(r.code));
+    const taken = [...registryCodes, ...inUse.tags];
+
     const code = generateChannelCode(trimmed, taken);
     if (!code) {
       return { ok: false, error: "Could not derive a link code from that name" };
     }
+
+    // Did a historical tag push the code off the obvious one? Say so.
+    const wanted = generateChannelCode(trimmed, registryCodes);
+    const notice =
+      wanted && wanted !== code
+        ? `"${wanted}" is already in use by past activity that no channel ` +
+          `is registered for, so this channel uses "${code}" instead. ` +
+          `The "${wanted}" results stay on their own row until you ` +
+          `reconcile them deliberately.`
+        : undefined;
 
     const { data, error } = await adminDb
       .from("share_channels")
@@ -186,7 +302,11 @@ export async function createChannel(label: string): Promise<ChannelMutationResul
         channel_label: trimmed,
       });
       revalidatePath("/admin/drops");
-      return { ok: true, channel: toChannel(data as Record<string, unknown>) };
+      return {
+        ok: true,
+        channel: toChannel(data as Record<string, unknown>),
+        notice,
+      };
     }
     if (error && isMissingEventsTable(error)) {
       return { ok: false, error: CHANNELS_MIGRATION_REQUIRED };
@@ -366,12 +486,20 @@ export async function recordChannelCopy(
 export type ChannelResultsPayload = {
   rows: ChannelResult[];
   totals: AggregateTotals;
-  /** Null when copies/visits/sessions are not recorded at all. */
-  measuredSince: string | null;
+  /**
+   * The first copy/visit/checkout-session actually RECORDED, or null.
+   *
+   * Null with `migrationMissing` false means tracking is live but has
+   * captured nothing yet — which is NOT the same as zero activity, and
+   * must not be rendered as a date or as a zero.
+   */
+  firstRecordedActivity: string | null;
   eventsTracked: boolean;
   migrationMissing: boolean;
   /** True when migration-012 is absent, so orders carry no tag at all. */
   tagColumnMissing: boolean;
+  /** A read hit the page-safety cap: these are floors, not totals. */
+  incomplete: boolean;
 };
 
 type AggregateTotals = ReturnType<typeof aggregateChannelResults>["totals"];
@@ -403,8 +531,7 @@ export async function channelResultsForDrop(
   let ordersRead = await readAll<OrderRow>(
     "orders",
     "tag, quantity, price_paid, status, redemption_status",
-    "drop_item_id",
-    dropId,
+    { column: "drop_item_id", value: dropId },
   );
   let tagColumnMissing = false;
   if (ordersRead.error && /tag/i.test(ordersRead.error)) {
@@ -412,8 +539,7 @@ export async function channelResultsForDrop(
     ordersRead = await readAll<OrderRow>(
       "orders",
       "quantity, price_paid, status, redemption_status",
-      "drop_item_id",
-      dropId,
+      { column: "drop_item_id", value: dropId },
     );
   }
   if (ordersRead.error) {
@@ -425,26 +551,36 @@ export async function channelResultsForDrop(
   const eventsRead = await readAll<EventRow>(
     "channel_events",
     "tag, event_type",
-    "drop_item_id",
-    dropId,
+    { column: "drop_item_id", value: dropId },
   );
 
-  const channelsRead = await adminDb.from("share_channels").select(CHANNEL_COLS);
-  const migrationMissing =
-    eventsRead.missingTable ||
-    (channelsRead.error ? isMissingEventsTable(channelsRead.error) : false);
+  const channelsRead = await readAll<{
+    code: string;
+    label: string;
+    is_active: boolean;
+  }>("share_channels", CHANNEL_COLS, null);
 
-  const startedAt = migrationMissing ? null : await instrumentationStartedAt();
+  const migrationMissing = eventsRead.missingTable || channelsRead.missingTable;
+
+  const firstActivity = migrationMissing ? null : await firstRecordedActivityAt();
+
+  // If ANY read hit the safety cap, every number downstream is a floor
+  // rather than a total. The caller must present it as incomplete; it
+  // must never be shown as a total, because a plausible wrong total is
+  // worse than an admitted gap.
+  const incomplete =
+    ordersRead.truncated || eventsRead.truncated || channelsRead.truncated;
 
   const aggregated = aggregateChannelResults({
     orders: ordersRead.rows,
     // null, not [], when the table is absent: that is the difference
     // between "measured and found nothing" and "never measured".
     events: eventsRead.missingTable ? null : eventsRead.rows,
-    channels: (channelsRead.data ?? []).map((r) => {
-      const row = r as { code: string; label: string; is_active: boolean };
-      return { code: row.code, label: row.label, is_active: row.is_active };
-    }),
+    channels: channelsRead.rows.map((row) => ({
+      code: row.code,
+      label: row.label,
+      is_active: row.is_active,
+    })),
   });
 
   return {
@@ -453,8 +589,9 @@ export async function channelResultsForDrop(
       rows: aggregated.rows,
       totals: aggregated.totals,
       eventsTracked: aggregated.eventsTracked,
-      measuredSince: startedAt ? startedAt.toISOString() : null,
+      firstRecordedActivity: firstActivity ? firstActivity.toISOString() : null,
       migrationMissing,
+      incomplete,
       // migration-012 absent: every order reads as untagged, which is the
       // truth about the data but not about the world. Say so rather than
       // letting the panel imply nobody ever used a channel link.

@@ -1,5 +1,6 @@
 import { adminDb } from "@/lib/supabase-admin";
 import { normalizeTag } from "@/lib/attribution/tag";
+import { bounded, EVENT_WRITE_TIMEOUT_MS } from "@/lib/channels/bounded";
 
 /**
  * Recording channel events: copies, visits, created checkout sessions.
@@ -8,10 +9,14 @@ import { normalizeTag } from "@/lib/attribution/tag";
  * as hostile: shapes are validated, lengths are bounded, and anything
  * that does not match is dropped rather than stored.
  *
- * THE CARDINAL RULE: recording must never break the thing it measures.
- * Every function here swallows its own failures and returns a boolean.
- * A tracking table that is missing, full, slow or revoked must not cost
- * a customer their checkout.
+ * THE CARDINAL RULE: recording must never break the thing it measures,
+ * and must never hold it up either. Every function here swallows its own
+ * failures AND abandons the wait at a deadline, returning a boolean. A
+ * tracking table that is missing, full, revoked or simply slow must not
+ * cost a customer their checkout or add visible latency to it.
+ *
+ * Swallowing errors alone would not achieve the second half: a write
+ * that hangs never throws. The deadline lives in lib/channels/bounded.
  *
  * NOTHING identifying is stored. No phone, no qr_token, no payment
  * secret, no IP, no user agent. A row is: what kind of event, which
@@ -31,7 +36,15 @@ const MAX_DROP_ID = 200;
 /** Postgres unique_violation — a duplicate beacon, which is success. */
 const UNIQUE_VIOLATION = "23505";
 
-/** The table is absent (migration-013 not applied) — degrade, never throw. */
+/**
+ * migration-013 is not applied — degrade, never throw.
+ *
+ * PGRST202 is included because the migration also installs two
+ * functions: when it is missing, PostgREST cannot resolve them by name
+ * and reports that rather than a missing relation. Treating it as
+ * anything but "migration pending" would log an error storm on every
+ * page view of an un-migrated deploy.
+ */
 export function isMissingEventsTable(
   error: { code?: string; message?: string } | null,
 ): boolean {
@@ -39,6 +52,8 @@ export function isMissingEventsTable(
   if (error.code === "42703") return false; // undefined_column, not table
   return (
     error.code === "42P01" ||
+    error.code === "PGRST202" || // function not in the schema cache
+    /record_channel_event|channel_tags_in_use/i.test(error.message ?? "") ||
     /channel_events|share_channels|channel_instrumentation/i.test(error.message ?? "") ||
     /relation .* does not exist/i.test(error.message ?? "")
   );
@@ -64,27 +79,54 @@ async function record(
   dedupeKey: string,
   dropItemId: string | null,
   tag: string | null,
+  timeoutMs: number = EVENT_WRITE_TIMEOUT_MS,
 ): Promise<boolean> {
-  try {
-    const { error } = await adminDb.from("channel_events").insert({
-      event_type: eventType,
-      drop_item_id: dropItemId,
-      tag,
-      dedupe_key: dedupeKey,
-    });
+  // One RPC, one transaction: the insert and the initialization of
+  // first_event_at commit together. Two round trips could leave a
+  // recorded event with no recorded start if the second were lost.
+  const outcome = await bounded(
+    (signal) =>
+      adminDb
+        .rpc("record_channel_event", {
+          p_event_type: eventType,
+          p_drop_item_id: dropItemId,
+          p_tag: tag,
+          p_dedupe_key: dedupeKey,
+        })
+        .abortSignal(signal),
+    timeoutMs,
+  );
 
-    if (!error) return true;
-    if (error.code === UNIQUE_VIOLATION) return false; // already counted
-    if (isMissingEventsTable(error)) return false; // migration-013 pending
-    console.error("[channels/events] insert failed:", error.message);
-    return false;
-  } catch (err) {
+  if (outcome.status === "timeout") {
+    // The statement may still land — it is idempotent under the dedupe
+    // key — but nothing waits for it. A count we may have lost is a far
+    // smaller harm than a checkout we delayed.
     console.error(
-      "[channels/events] insert threw:",
+      `[channels/events] ${eventType} write exceeded ${timeoutMs}ms; abandoned`,
+    );
+    return false;
+  }
+
+  if (outcome.status === "error") {
+    const err = outcome.error;
+    console.error(
+      "[channels/events] rpc threw:",
       err instanceof Error ? err.message : "unknown error",
     );
     return false;
   }
+
+  const { data, error } = outcome.value;
+  if (error) {
+    if (error.code === UNIQUE_VIOLATION) return false; // already counted
+    if (isMissingEventsTable(error)) return false; // migration-013 pending
+    console.error("[channels/events] rpc failed:", error.message);
+    return false;
+  }
+
+  // 'recorded' | 'duplicate'. A duplicate is success for the caller and
+  // a no-op for the count, which is the entire point of the dedupe key.
+  return data === "recorded";
 }
 
 /**
@@ -142,22 +184,34 @@ export async function recordCheckoutSession(opts: {
 }
 
 /**
- * When measurement began, or null if it has not.
+ * The first copy, visit or checkout session actually RECORDED, or null.
  *
- * Null means the migration has not been applied, and the UI must say
- * "not tracked" rather than render an absent past as zero.
+ * Deliberately NOT "when tracking started" and NOT "when the code
+ * deployed". Neither is observable from here, and the earlier version of
+ * this feature claimed the migration's apply time was both — which
+ * presented every hour between applying the SQL and deploying the code
+ * as measured and empty.
+ *
+ * Null has two meanings, and the caller distinguishes them by whether
+ * the events table exists at all: migration not applied (not tracked),
+ * or applied with nothing recorded yet (tracking, no activity). Neither
+ * is zero activity over a known window.
  */
-export async function instrumentationStartedAt(): Promise<Date | null> {
-  try {
-    const { data, error } = await adminDb
+export async function firstRecordedActivityAt(): Promise<Date | null> {
+  const outcome = await bounded((signal) =>
+    adminDb
       .from("channel_instrumentation")
-      .select("started_at")
+      .select("first_event_at")
       .limit(1)
-      .maybeSingle();
-    if (error || !data) return null;
-    const parsed = new Date((data as { started_at: string }).started_at);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  } catch {
-    return null;
-  }
+      .abortSignal(signal)
+      .maybeSingle(),
+  );
+  if (outcome.status !== "ok") return null;
+
+  const { data, error } = outcome.value;
+  if (error || !data) return null;
+  const raw = (data as { first_event_at: string | null }).first_event_at;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

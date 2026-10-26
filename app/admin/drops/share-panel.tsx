@@ -85,6 +85,8 @@ export default function SharePanel({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameLabel, setRenameLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [registryTruncated, setRegistryTruncated] = useState(false);
   const [results, setResults] = useState<ChannelResultsPayload | null>(null);
   const [showRetired, setShowRetired] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -109,6 +111,7 @@ export default function SharePanel({
       }
       setChannels(list.channels);
       setMigrationMissing(list.migrationMissing);
+      setRegistryTruncated(list.truncated);
       if (res.ok) setResults(res.results);
       setLoaded(true);
     });
@@ -189,6 +192,7 @@ export default function SharePanel({
 
   const onAdd = () => {
     setError(null);
+    setNotice(null);
     const label = newLabel.trim();
     if (!label) return;
     startTransition(async () => {
@@ -199,6 +203,11 @@ export default function SharePanel({
       }
       setNewLabel("");
       setSelected(res.channel.code);
+      // The code may have stepped around a tag already in the data.
+      // Telling them is the whole point: a channel quietly given a
+      // different code than its name implies is a surprise waiting to
+      // happen the first time they compare a link to a report.
+      if (res.notice) setNotice(res.notice);
       refresh();
     });
   };
@@ -315,6 +324,30 @@ export default function SharePanel({
       {error && (
         <div style={{ fontSize: 12, color: T.red, marginBottom: 10, lineHeight: 1.5 }}>
           {error}
+        </div>
+      )}
+
+      {registryTruncated && (
+        <div style={{ fontSize: 12, color: T.amber, marginBottom: 10, lineHeight: 1.5 }}>
+          <strong>Channel list incomplete.</strong> There are more channels than a single
+          read is allowed to walk, so some are missing from the picker and from the table
+          below. Retire channels you no longer share to bring the list back under the cap.
+        </div>
+      )}
+
+      {notice && (
+        <div
+          style={{
+            fontSize: 12,
+            color: T.amber,
+            marginBottom: 10,
+            lineHeight: 1.5,
+            border: `1px solid ${T.amber}`,
+            borderRadius: 6,
+            padding: "8px 10px",
+          }}
+        >
+          {notice}
         </div>
       )}
 
@@ -590,6 +623,25 @@ function Results({
         </button>
       </div>
 
+      {results.incomplete && (
+        <div
+          style={{
+            border: `1px solid ${T.amber}`,
+            borderRadius: 6,
+            padding: "8px 10px",
+            marginBottom: 8,
+            fontSize: 11,
+            color: T.amber,
+            lineHeight: 1.5,
+          }}
+        >
+          <strong>Incomplete results.</strong> This drop has more records than a single
+          read is allowed to walk, so the rows below are floors, not totals — the real
+          numbers are higher by an unknown amount. Nothing here should be used for a
+          payout or a partner report until it can be read in full.
+        </div>
+      )}
+
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, color: T.text }}>
           <thead>
@@ -625,16 +677,28 @@ function Results({
                 <td style={cell}>{money(r.recordedValueBeforeRefunds)}</td>
               </tr>
             ))}
-            <tr style={{ borderTop: `2px solid ${T.border}`, fontWeight: 700 }}>
-              <td style={{ padding: "6px 8px" }}>Total</td>
-              <td style={cell}>{measured ? results.totals.copies : "—"}</td>
-              <td style={cell}>{measured ? results.totals.visits : "—"}</td>
-              <td style={cell}>{measured ? results.totals.checkoutSessions : "—"}</td>
-              <td style={cell}>{results.totals.paidOrders}</td>
-              <td style={cell}>{results.totals.packsOrdered}</td>
-              <td style={cell}>{results.totals.pickedUpOrders}</td>
-              <td style={cell}>{money(results.totals.recordedValueBeforeRefunds)}</td>
-            </tr>
+            {/* A total is a claim that everything was counted. When a read
+                hit the safety cap that claim is false, so the row is
+                withheld rather than quietly understated. */}
+            {results.incomplete ? (
+              <tr style={{ borderTop: `2px solid ${T.border}`, fontWeight: 700 }}>
+                <td style={{ padding: "6px 8px" }}>Total</td>
+                <td style={{ ...cell, textAlign: "left", color: T.amber, fontWeight: 600 }} colSpan={7}>
+                  Not totalled — results incomplete
+                </td>
+              </tr>
+            ) : (
+              <tr style={{ borderTop: `2px solid ${T.border}`, fontWeight: 700 }}>
+                <td style={{ padding: "6px 8px" }}>Total</td>
+                <td style={cell}>{measured ? results.totals.copies : "—"}</td>
+                <td style={cell}>{measured ? results.totals.visits : "—"}</td>
+                <td style={cell}>{measured ? results.totals.checkoutSessions : "—"}</td>
+                <td style={cell}>{results.totals.paidOrders}</td>
+                <td style={cell}>{results.totals.packsOrdered}</td>
+                <td style={cell}>{results.totals.pickedUpOrders}</td>
+                <td style={cell}>{money(results.totals.recordedValueBeforeRefunds)}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -650,16 +714,24 @@ function Results({
           against an order, so refunded orders are still counted above.
         </li>
         <li>
-          {measured ? (
-            <>
-              Copies, visits and checkouts are measured from{" "}
-              <strong>{fmtDate(results.measuredSince)}</strong>. Anything before that was
-              never measured — it is not zero.
-            </>
-          ) : (
+          {!measured ? (
             <>
               Copies, visits and checkouts are <strong>not tracked</strong> on this server.
               The dashes above mean no measurement exists, not zero.
+            </>
+          ) : results.firstRecordedActivity ? (
+            <>
+              <strong>First recorded activity:</strong>{" "}
+              {fmtDate(results.firstRecordedActivity)}. That is the first copy, visit or
+              checkout actually captured — not the date tracking was switched on, which
+              this product cannot observe. Anything earlier was never measured, and is
+              not zero.
+            </>
+          ) : (
+            <>
+              <strong>No activity recorded yet.</strong> Copies, visits and checkouts are
+              being tracked, but none has been captured so far. The dashes above mean
+              nothing has been measured, not that nothing happened.
             </>
           )}
         </li>

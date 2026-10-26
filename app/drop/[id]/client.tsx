@@ -10,6 +10,7 @@ import {
   hasEnded,
 } from "@/lib/drops/helpers";
 import { DP } from "@/lib/theme/tokens";
+import { startVisitBeacon } from "@/lib/channels/visit-beacon";
 
 // ─── Theme — matches TicketCard.tsx visual language. Colors sourced from
 //     the centralized DealsPro token file (local names unchanged). ────────
@@ -99,36 +100,40 @@ export default function DealClient({
 
   // ── Visit beacon ────────────────────────────────────────────────
   // Fires once, from the browser, AFTER this page has actually
-  // rendered — which is why it lives in an effect and not in the server
-  // component. A prefetch, a crawler fetch or an SSR pass never reaches
-  // here, so none of them is counted as a visit.
+  // rendered AND been visible — which is why it lives in an effect and
+  // not in the server component. A prefetch, a crawler fetch or an SSR
+  // pass never reaches here, so none of them is counted as a visit.
+  //
+  // Mounting is not enough. A tab opened in the background mounts at
+  // once and may never be looked at, so the beacon waits for the first
+  // moment the page is visible and is never sent if that moment does
+  // not come.
   //
   // This counts PAGE VIEWS. Not unique people, not reach, and not proof
   // a human read anything. One id per mount makes a retry or a
   // double-invoked effect a no-op at the database's unique index rather
   // than a second visit.
-  const visitSent = useRef(false);
+  const visitState = useRef({ sent: false });
   useEffect(() => {
-    if (visitSent.current) return;
-    visitSent.current = true;
+    return startVisitBeacon(document, visitState.current, () => {
+      let eventId: string;
+      try {
+        eventId = crypto.randomUUID();
+      } catch {
+        // No crypto (very old browser): skip rather than send something
+        // that could collide with another visitor's beacon.
+        return;
+      }
 
-    let eventId: string;
-    try {
-      eventId = crypto.randomUUID();
-    } catch {
-      // No crypto (very old browser): skip rather than send something
-      // that could collide with another visitor's beacon.
-      return;
-    }
-
-    // keepalive so the beacon survives an immediate navigation away.
-    void fetch("/api/track/visit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dropItemId: item.id, tag, eventId }),
-      keepalive: true,
-    }).catch(() => {
-      /* Measurement must never disturb the page it measures. */
+      // keepalive so the beacon survives an immediate navigation away.
+      void fetch("/api/track/visit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dropItemId: item.id, tag, eventId }),
+        keepalive: true,
+      }).catch(() => {
+        /* Measurement must never disturb the page it measures. */
+      });
     });
   }, [item.id, tag]);
 
