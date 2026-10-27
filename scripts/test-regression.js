@@ -1551,7 +1551,20 @@ async function testRestaurantIntake() {
         const { token } = await signIntakeToken(restB.id);
         const res = await fetchWithRetry(`${BASE_URL}/intake/${token}`);
         const html = await res.text();
-        if (/not active/i.test(html) && !html.includes("Intake Test Kitchen B")) {
+        // Two things must hold, and both are the point of the test:
+        //   1. the REJECTION page rendered, not the intake form. The
+        //      "fresh submission link" line is on every failure reason,
+        //      so it is a stable signal that the link was refused.
+        //   2. the partner's own details are not exposed on it.
+        // The reason-specific wording is matched without the
+        // apostrophe in "isn't", which HTML-escapes differently
+        // depending on how the page is rendered — matching on it is
+        // what made the previous assertion stale when the copy changed
+        // from "not active" to "isn't active".
+        const blocked =
+          html.includes("Ask your DealsPro contact for a fresh submission link.") &&
+          /active on DealsPro right now/i.test(html);
+        if (blocked && !html.includes("Intake Test Kitchen B")) {
           pass("Intake: deactivating a restaurant kills its outstanding links");
         } else {
           fail("Intake: inactive restaurant", "inactive partner still rendered");
@@ -4124,14 +4137,28 @@ async function testPartnerRestaurants() {
         longitude: -96.8,
         place_id: null,
       };
+      // `slug` is NOT NULL since migration-008b, and uq_restaurants_slug
+      // makes it unique. RESTAURANT_TEST_TAG carries a timestamp, so
+      // these stay distinct across runs even if a previous run died
+      // before its cleanup.
       const { data: activeRow, error: e1 } = await supabase
         .from("restaurants")
-        .insert({ ...baseRow, name: "Test Active Co", is_active: true })
+        .insert({
+          ...baseRow,
+          name: "Test Active Co",
+          slug: `${RESTAURANT_TEST_TAG}-active`,
+          is_active: true,
+        })
         .select()
         .single();
       const { data: inactiveRow, error: e2 } = await supabase
         .from("restaurants")
-        .insert({ ...baseRow, name: "Test Inactive Co", is_active: false })
+        .insert({
+          ...baseRow,
+          name: "Test Inactive Co",
+          slug: `${RESTAURANT_TEST_TAG}-inactive`,
+          is_active: false,
+        })
         .select()
         .single();
       if (e1 || e2) {
@@ -4191,6 +4218,7 @@ async function testPartnerRestaurants() {
         .from("restaurants")
         .insert({
           name: "Test Denorm Co",
+          slug: `${RESTAURANT_TEST_TAG}-denorm`,
           city: "Frisco",
           tags: [RESTAURANT_TEST_TAG],
           address: "2 Denorm Ave, Frisco, TX",
@@ -5216,6 +5244,7 @@ async function testRestaurantImageUrl() {
       .from("restaurants")
       .insert({
         name: "Test Image Round-Trip",
+        slug: `${RESTAURANT_TEST_TAG}-image`,
         city: "Frisco",
         tags: [RESTAURANT_TEST_TAG],
         address: "9 Image Way, Frisco, TX",
