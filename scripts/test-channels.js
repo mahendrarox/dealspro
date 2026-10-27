@@ -1261,9 +1261,21 @@ function testFirstRecordedActivity() {
     "a second round trip could be lost",
   );
   check(
-    "The stamp is written once and never moved",
-    /SET first_event_at = v_at\s*\n\s*WHERE id = true AND first_event_at IS NULL/.test(sql),
-    "a later event could overwrite the first",
+    "The stamp only ever moves EARLIER, never later",
+    // `IS NULL` alone is not sufficient and was a real bug: now() is the
+    // transaction's start time, so a transaction that began earlier can
+    // commit later, find the column already set, and leave a stamp that
+    // postdates an event it is meant to bound. The guard must also fire
+    // when the stored value is greater than the candidate.
+    /SET first_event_at = v_at\s*\n\s*WHERE id = true\s*\n\s*AND \(first_event_at IS NULL OR first_event_at > v_at\);/.test(sql),
+    "a later-committing earlier event cannot correct the stamp",
+  );
+  check(
+    "The stamp is never raised by a later event",
+    // The complement of the above: there must be no unguarded write.
+    !/SET first_event_at = v_at\s*;/.test(sql) &&
+      !/SET first_event_at = now\(\)/.test(sql),
+    "an unguarded write would let any later event overwrite the first",
   );
   check(
     "The insert and the stamp share one timestamp",

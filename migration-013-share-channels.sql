@@ -292,11 +292,26 @@ BEGIN
   INSERT INTO channel_events (event_type, drop_item_id, tag, dedupe_key, created_at)
   VALUES (p_event_type, p_drop_item_id, p_tag, p_dedupe_key, v_at);
 
-  -- Same transaction. Only ever written once: the guard makes a second
-  -- event leave the first one's timestamp alone.
+  -- Same transaction, and MONOTONICALLY DOWNWARD.
+  --
+  -- `IS NULL` alone was not enough. now() is the transaction's start
+  -- time, so a transaction that began earlier can commit later. With
+  -- two concurrent events: B begins at t=2, commits first and stamps
+  -- 2; A began at t=1 and commits second, finds the column non-NULL
+  -- and leaves it — so first_event_at reads 2 while the earliest row
+  -- in channel_events reads 1. The column would then name an instant
+  -- AFTER activity it is supposed to bound, and verification E below
+  -- would fail, correctly.
+  --
+  -- Taking the lower value fixes it whatever order the commits land
+  -- in. Under READ COMMITTED the second writer blocks on this row and
+  -- re-evaluates the WHERE clause against the committed value, so the
+  -- comparison is made against what is actually stored, not against a
+  -- stale snapshot.
   UPDATE channel_instrumentation
      SET first_event_at = v_at
-   WHERE id = true AND first_event_at IS NULL;
+   WHERE id = true
+     AND (first_event_at IS NULL OR first_event_at > v_at);
 
   RETURN 'recorded';
 EXCEPTION
@@ -449,17 +464,60 @@ FROM pg_trigger
 WHERE tgrelid = 'public.share_channels'::regclass
   AND tgname = 'share_channels_code_write_once';
 
--- G. Both functions exist, and no browser role can execute either.
---    Expect two PASS rows.
+-- G1. Both functions exist, no browser role can execute either, AND
+--     service_role CAN. Checking only that anon/authenticated are shut
+--     out would be satisfied by a function nobody can call at all —
+--     which would leave every copy, visit and checkout silently
+--     unrecorded while this verification still read "PASS".
+--     Expect two PASS rows.
 SELECT p.proname,
-       CASE WHEN has_function_privilege('anon', p.oid, 'EXECUTE')
-              OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
-            THEN 'FAIL — a browser role can execute this'
-            ELSE 'PASS — service-role only' END AS verdict
+       has_function_privilege('anon', p.oid, 'EXECUTE')          AS anon_exec,
+       has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authed_exec,
+       has_function_privilege('service_role', p.oid, 'EXECUTE')  AS service_exec,
+       CASE
+         WHEN has_function_privilege('anon', p.oid, 'EXECUTE')
+           OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+              THEN 'FAIL — a browser role can execute this'
+         WHEN NOT has_function_privilege('service_role', p.oid, 'EXECUTE')
+              THEN 'FAIL — service_role cannot execute it; nothing will record'
+         ELSE 'PASS — service_role only'
+       END AS verdict
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
 WHERE p.proname IN ('record_channel_event', 'channel_tags_in_use')
 ORDER BY p.proname;
+
+-- G2. Both functions are SECURITY INVOKER, so they run with the
+--     CALLER's privileges — EXECUTE on the function is not enough on
+--     its own. service_role must also hold the table privileges each
+--     function's body actually uses, or the call fails at runtime with
+--     a permission error rather than at deploy time here.
+--     Expect four PASS rows.
+SELECT needed.fn, needed.tbl, needed.priv,
+       has_table_privilege('service_role', needed.tbl, needed.priv) AS granted,
+       CASE WHEN has_table_privilege('service_role', needed.tbl, needed.priv)
+            THEN 'PASS'
+            ELSE 'FAIL — the function will error when called' END AS verdict
+FROM (VALUES
+        ('record_channel_event', 'public.channel_events',          'INSERT'),
+        ('record_channel_event', 'public.channel_instrumentation', 'UPDATE'),
+        ('channel_tags_in_use',  'public.orders',                  'SELECT'),
+        ('channel_tags_in_use',  'public.channel_events',          'SELECT')
+     ) AS needed(fn, tbl, priv)
+ORDER BY needed.fn, needed.tbl;
+
+-- G3. These tables have RLS on and ZERO policies, so a caller that does
+--     not bypass RLS reads and writes nothing through them whatever its
+--     table grants say. service_role is expected to hold BYPASSRLS;
+--     without it the functions above would silently affect zero rows
+--     rather than raise — the worst failure mode of the three, because
+--     nothing would look wrong.
+SELECT rolname,
+       rolbypassrls,
+       CASE WHEN rolbypassrls THEN 'PASS — bypasses RLS as expected'
+            ELSE 'FAIL — RLS with zero policies will silently block it' END AS verdict
+FROM pg_roles
+WHERE rolname = 'service_role';
 
 -- H. Nothing existing was disturbed: orders still has its own indexes.
 SELECT indexname FROM pg_indexes

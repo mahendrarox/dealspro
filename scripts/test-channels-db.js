@@ -13,7 +13,7 @@
  * Run: npm run test:channels:db
  */
 
-const { execFileSync, spawnSync } = require("child_process");
+const { execFileSync, spawnSync, spawn } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -103,6 +103,30 @@ function sql(text) {
   }
 }
 const one = (t) => sql(t).out;
+
+/** Run SQL on its OWN connection, without waiting for it. */
+function sqlAsync(text, label) {
+  const file = path.join(DATA, `async-${label}.sql`);
+  fs.writeFileSync(file, text);
+  fs.chmodSync(file, 0o644);
+  const exe = path.join(BIN, "psql");
+  const args = [
+    "-h", DATA, "-p", String(PORT), "-U", "postgres", "-d", "chantest",
+    "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-f", file,
+  ];
+  const child = RUNAS
+    ? spawn("su", [RUNAS, "-s", "/bin/bash", "-c",
+        `${exe} ${args.map((a) => `'${String(a).replace(/'/g, "'\\''")}'`).join(" ")}`],
+        { stdio: ["ignore", "pipe", "pipe"] })
+    : spawn(exe, args, { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.on("data", (d) => { stdout += d; });
+  child.stderr.on("data", (d) => { stderr += d; });
+  return new Promise((resolve) => {
+    child.on("exit", (code) => resolve({ code, out: stdout.trim(), err: stderr.trim() }));
+  });
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Assert a statement is REJECTED, by the named guard. */
 const rejects = (t, guard) => {
   const r = sql(t);
@@ -816,12 +840,135 @@ check(
 
 sql(`DROP FUNCTION IF EXISTS slow_event_stub();`);
 
-console.log(`\n${"═".repeat(54)}`);
-console.log(`  TOTAL: ${passed} PASS / ${failed} FAIL`);
-console.log(`${"═".repeat(54)}\n`);
-if (failures.length > 0) {
-  console.log("FAILED TESTS:");
-  failures.forEach((f) => console.log(`  ✗ ${f.n} — ${f.r}`));
-  console.log("");
+
+// ═══════════════════════════════════════════════════════════════════════
+// OUT-OF-ORDER CONCURRENT EVENTS (two real connections)
+//
+// now() is the TRANSACTION's start time, so a transaction that began
+// earlier can commit later. If first_event_at were only written when
+// NULL, the later-committing-but-earlier-starting transaction would find
+// it already set and leave it — naming an instant AFTER activity it is
+// meant to bound, and failing verification E.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function outOfOrderTest() {
+  section("Out-of-order concurrent events (two real connections)");
+
+  sql(`DELETE FROM channel_events;
+       UPDATE channel_instrumentation SET first_event_at = NULL;`);
+
+  // A begins FIRST — `SELECT 1` fixes its transaction timestamp — then
+  // sleeps, so it commits LAST while carrying the EARLIER now().
+  const started = Date.now();
+  const a = sqlAsync(
+    `BEGIN;
+     SELECT 1;
+     SELECT pg_sleep(3);
+     SELECT record_channel_event('visit', 'drop-ooo', 'early', 'visit:ooo-early');
+     COMMIT;`,
+    "ooo-a",
+  );
+
+  await sleep(1200); // B's transaction starts ~1.2s after A's.
+
+  const b = sqlAsync(
+    `BEGIN;
+     SELECT record_channel_event('visit', 'drop-ooo', 'late', 'visit:ooo-late');
+     COMMIT;`,
+    "ooo-b",
+  );
+
+  const bDone = b.then((r) => ({ ...r, at: Date.now() - started }));
+  const aDone = a.then((r) => ({ ...r, at: Date.now() - started }));
+  const [ra, rb] = await Promise.all([aDone, bDone]);
+
+  check("connection A succeeded", ra.code === 0, ra.err.slice(0, 200));
+  check("connection B succeeded", rb.code === 0, rb.err.slice(0, 200));
+  console.log(`  observed: B committed at ~${rb.at}ms, A at ~${ra.at}ms`);
+
+  // ── The scenario must actually have occurred ─────────────────────
+  // Without these two, everything below could pass trivially on a
+  // serialised run that never exercised the bug at all.
+  check(
+    "B committed BEFORE A (the later starter finished first)",
+    rb.at < ra.at,
+    `A finished at ${ra.at}ms, B at ${rb.at}ms — not out of order`,
+  );
+  check(
+    "A's event carries the EARLIER timestamp despite committing last",
+    one(`SELECT (
+           (SELECT created_at FROM channel_events WHERE tag='early') <
+           (SELECT created_at FROM channel_events WHERE tag='late')
+         )::text;`) === "true",
+    "the two events are not out of order; the test proves nothing",
+  );
+  check(
+    "both events were recorded",
+    one(`SELECT count(*)::text FROM channel_events WHERE drop_item_id='drop-ooo';`) === "2",
+  );
+
+  // ── The guarantee ────────────────────────────────────────────────
+  check(
+    "first_event_at equals the EARLIEST event, not the first committed",
+    one(`SELECT (ci.first_event_at = (SELECT min(created_at) FROM channel_events))::text
+         FROM channel_instrumentation ci;`) === "true",
+    `first_event_at=${one(`SELECT first_event_at::text FROM channel_instrumentation;`)} ` +
+      `min(created_at)=${one(`SELECT min(created_at)::text FROM channel_events;`)}`,
+  );
+  check(
+    "first_event_at is not LATER than any recorded event",
+    // Parenthesised deliberately: `::` binds tighter than NOT, so
+    // `NOT EXISTS (...)::text` is a type error, not a negation.
+    one(`SELECT (NOT EXISTS (
+           SELECT 1 FROM channel_events e, channel_instrumentation ci
+           WHERE e.created_at < ci.first_event_at
+         ))::text;`) === "true",
+    "an event predates the instant the column claims measurement began",
+  );
+
+  // ── Verification E, run exactly as the migration ships it ────────
+  const verdictE = one(
+    `SELECT CASE
+              WHEN count(*) <> 1 THEN 'FAIL — expected exactly one row'
+              WHEN min(first_event_at) IS NULL
+               AND NOT EXISTS (SELECT 1 FROM channel_events)
+                   THEN 'PASS — nothing recorded yet, nothing claimed'
+              WHEN min(first_event_at) = (SELECT min(created_at) FROM channel_events)
+                   THEN 'PASS — matches the earliest recorded event'
+              ELSE 'FAIL — timestamp does not match the first recorded event'
+            END
+     FROM channel_instrumentation;`,
+  );
+  check(
+    "migration verification E reports PASS after out-of-order events",
+    verdictE.startsWith("PASS"),
+    verdictE,
+  );
+
+  // ── A third, later event must not disturb the settled value ──────
+  const settled = one(`SELECT first_event_at::text FROM channel_instrumentation;`);
+  one(`SELECT record_channel_event('copy', 'drop-ooo', 'early', 'copy:ooo-after');`);
+  check(
+    "a later event still does not move first_event_at",
+    one(`SELECT first_event_at::text FROM channel_instrumentation;`) === settled,
+    "the monotonic guard let a later timestamp overwrite the earliest",
+  );
+
+  sql(`DELETE FROM channel_events WHERE drop_item_id='drop-ooo';`);
 }
-process.exit(failed > 0 ? 1 : 0);
+
+outOfOrderTest()
+  .catch((err) => {
+    fail("out-of-order concurrency test", err && err.message ? err.message : String(err));
+  })
+  .then(() => {
+    console.log(`\n${"═".repeat(54)}`);
+    console.log(`  TOTAL: ${passed} PASS / ${failed} FAIL`);
+    console.log(`${"═".repeat(54)}\n`);
+    if (failures.length > 0) {
+      console.log("FAILED TESTS:");
+      failures.forEach((f) => console.log(`  ✗ ${f.n} — ${f.r}`));
+      console.log("");
+    }
+    process.exit(failed > 0 ? 1 : 0);
+  });
