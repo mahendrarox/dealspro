@@ -492,7 +492,14 @@ ORDER BY p.proname;
 --     its own. service_role must also hold the table privileges each
 --     function's body actually uses, or the call fails at runtime with
 --     a permission error rather than at deploy time here.
---     Expect four PASS rows.
+--
+--     SELECT on channel_instrumentation is listed as well as UPDATE:
+--     the UPDATE is qualified by
+--       WHERE id = true AND (first_event_at IS NULL OR first_event_at > v_at)
+--     and reading columns in an UPDATE's WHERE clause requires SELECT
+--     on them. UPDATE alone would let the statement fail on a
+--     permission error at the moment the first event is recorded.
+--     Expect five PASS rows.
 SELECT needed.fn, needed.tbl, needed.priv,
        has_table_privilege('service_role', needed.tbl, needed.priv) AS granted,
        CASE WHEN has_table_privilege('service_role', needed.tbl, needed.priv)
@@ -501,10 +508,11 @@ SELECT needed.fn, needed.tbl, needed.priv,
 FROM (VALUES
         ('record_channel_event', 'public.channel_events',          'INSERT'),
         ('record_channel_event', 'public.channel_instrumentation', 'UPDATE'),
+        ('record_channel_event', 'public.channel_instrumentation', 'SELECT'),
         ('channel_tags_in_use',  'public.orders',                  'SELECT'),
         ('channel_tags_in_use',  'public.channel_events',          'SELECT')
      ) AS needed(fn, tbl, priv)
-ORDER BY needed.fn, needed.tbl;
+ORDER BY needed.fn, needed.tbl, needed.priv;
 
 -- G3. These tables have RLS on and ZERO policies, so a caller that does
 --     not bypass RLS reads and writes nothing through them whatever its
