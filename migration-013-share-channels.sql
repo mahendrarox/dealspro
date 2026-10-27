@@ -132,13 +132,31 @@ COMMENT ON COLUMN share_channels.code IS
 COMMENT ON COLUMN share_channels.label IS
   'Display name. Editable; renaming never touches code.';
 
--- Reuse the trigger function migration-002 installed, so updated_at is
--- maintained by the database rather than by whichever caller remembers.
+-- updated_at is maintained by the database rather than by whichever
+-- caller remembers to set it.
+--
+-- This owns its trigger function outright instead of reusing
+-- migration-002's update_updated_at_column(). Reusing it made this file
+-- fail on a database where that helper is absent or lives outside the
+-- search_path — ERROR 42883, with the whole migration rolled back. A
+-- migration must not assume an unrelated earlier migration's private
+-- helper is present and reachable; schema-qualified and self-contained
+-- costs one small function and removes the assumption entirely.
+CREATE OR REPLACE FUNCTION public.share_channels_set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $dp013_sua$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END
+$dp013_sua$;
+
 DROP TRIGGER IF EXISTS update_share_channels_updated_at ON share_channels;
 CREATE TRIGGER update_share_channels_updated_at
 BEFORE UPDATE ON share_channels
 FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
+EXECUTE FUNCTION public.share_channels_set_updated_at();
 
 -- Write-once, enforced HERE rather than trusted to the application.
 -- The application never writes `code` on update, but a console session,
@@ -454,15 +472,32 @@ SELECT count(*) AS rows,
        END AS verdict
 FROM channel_instrumentation;
 
--- F. The write-once trigger on share_channels.code is installed.
+-- F. Both triggers on share_channels are installed and enabled, and
+--    each points at the function it is supposed to. The second column
+--    matters: a trigger whose function is missing is what made an
+--    earlier revision of this file fail with ERROR 42883, so naming the
+--    function here rather than assuming it is the point.
+--    Expect two PASS rows.
 -- tgenabled is type "char", which has no unambiguous || operator
 -- against an untyped literal. Cast it explicitly or this query errors.
-SELECT tgname,
-       CASE WHEN tgenabled = 'O' THEN 'PASS — enabled'
-            ELSE 'FAIL — disabled (' || tgenabled::text || ')' END AS verdict
-FROM pg_trigger
-WHERE tgrelid = 'public.share_channels'::regclass
-  AND tgname = 'share_channels_code_write_once';
+SELECT t.tgname,
+       p.proname AS calls,
+       CASE
+         WHEN t.tgenabled <> 'O'
+              THEN 'FAIL — disabled (' || t.tgenabled::text || ')'
+         WHEN t.tgname = 'share_channels_code_write_once'
+          AND p.proname = 'share_channels_code_write_once'
+              THEN 'PASS — enabled'
+         WHEN t.tgname = 'update_share_channels_updated_at'
+          AND p.proname = 'share_channels_set_updated_at'
+              THEN 'PASS — enabled'
+         ELSE 'FAIL — points at the wrong function'
+       END AS verdict
+FROM pg_trigger t
+JOIN pg_proc p ON p.oid = t.tgfoid
+WHERE t.tgrelid = 'public.share_channels'::regclass
+  AND NOT t.tgisinternal
+ORDER BY t.tgname;
 
 -- G1. Both functions exist, no browser role can execute either, AND
 --     service_role CAN. Checking only that anon/authenticated are shut

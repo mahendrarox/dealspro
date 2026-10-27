@@ -38,9 +38,12 @@ DROP TRIGGER  IF EXISTS update_share_channels_updated_at ON share_channels;
 DROP FUNCTION IF EXISTS record_channel_event(text, text, text, text);
 DROP FUNCTION IF EXISTS channel_tags_in_use();
 DROP FUNCTION IF EXISTS share_channels_code_write_once();
+DROP FUNCTION IF EXISTS public.share_channels_set_updated_at();
 
--- NOT dropped: update_updated_at_column(). migration-002 created it and
--- other tables still use it.
+-- NOT dropped: update_updated_at_column(). migration-013 no longer uses
+-- it — it owns share_channels_set_updated_at() instead — but
+-- migration-002 created it and other tables' triggers still depend on
+-- it, so it is none of this rollback's business.
 
 DROP TABLE    IF EXISTS channel_events;
 DROP TABLE    IF EXISTS channel_instrumentation;
@@ -59,15 +62,19 @@ FROM information_schema.tables
 WHERE table_schema = 'public'
   AND table_name IN ('share_channels', 'channel_events', 'channel_instrumentation');
 
--- B. Both functions are gone; update_updated_at_column() is NOT.
+-- B. All four of this feature's functions are gone, and
+--    update_updated_at_column() — which belongs to migration-002 and is
+--    still used by other tables' triggers — is NOT.
 SELECT p.proname,
        CASE WHEN p.proname = 'update_updated_at_column'
-            THEN 'EXPECTED — still needed by other tables'
+            THEN 'EXPECTED — belongs to migration-002, still in use'
             ELSE 'FAIL — should have been dropped' END AS verdict
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
 WHERE p.proname IN ('record_channel_event', 'channel_tags_in_use',
-                    'share_channels_code_write_once', 'update_updated_at_column');
+                    'share_channels_code_write_once',
+                    'share_channels_set_updated_at',
+                    'update_updated_at_column');
 
 -- C. THE IMPORTANT ONE: orders is untouched and still carries its tags.
 SELECT count(*)                                   AS orders_total,

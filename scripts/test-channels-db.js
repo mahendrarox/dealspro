@@ -172,11 +172,25 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
 `).ok);
 
-// migration-002's trigger function, which migration-013 reuses.
-check("updated_at trigger function present", sql(`
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = now(); RETURN NEW; END; $$ LANGUAGE plpgsql;
-`).ok);
+// migration-002's trigger function is DELIBERATELY NOT CREATED.
+//
+// It used to be, "because migration-013 reuses it" — and that is
+// precisely why this suite passed while the migration failed in
+// production with ERROR 42883. The fixture manufactured the dependency
+// it should have been proving unnecessary, so the assumption was
+// invisible here and only surfaced on a real database.
+//
+// migration-013 now owns share_channels_set_updated_at(). Asserting the
+// old helper's ABSENCE is what keeps that true: if anyone reintroduces
+// the dependency, the migration below fails here instead of on a
+// customer's database.
+check(
+  "migration-002's helper is absent, so independence is actually tested",
+  one(`SELECT count(*)::text FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
+       WHERE p.proname = 'update_updated_at_column';`) === "0",
+  "the fixture provides the helper, so this suite cannot detect a dependency on it",
+);
 
 // orders, as migration-012 leaves it.
 check("orders (with tag) created", sql(`
