@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 /**
  * DealsPro Regression Test Suite
- * Production-safe: uses only test data, always cleans up
+ *
+ * DESTRUCTIVE. This suite performs 92 write operations including 54
+ * deletes against whatever target is configured. It is gated by
+ * scripts/lib/test-env-guard.js, which REFUSES to run unless the target
+ * is affirmatively proven to be a dedicated test environment.
+ *
+ * The header previously read "Production-safe: uses only test data,
+ * always cleans up". That described intent, not a control, and nothing
+ * enforced it. The guard is the control.
+ *
  * Run: npm run test:regression
  */
 
@@ -18,6 +27,12 @@ try { require("tsx/cjs/api").register(); } catch { /* no-op */ }
 
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require("crypto");
+const {
+  assertTestEnvironment,
+  supabaseProbe,
+  TestEnvironmentRefused,
+  TEST_KEY_VAR,
+} = require("./lib/test-env-guard");
 
 // ═══════════════════════════════════════════════════════════════════════
 // CONFIG
@@ -162,10 +177,24 @@ async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
   }
 }
 
+// ── Fail-closed gate ────────────────────────────────────────────────
+// Set ONLY by assertTestEnvironment() in main(), after static and live
+// verification both pass. Every getSupabase() caller is a write path, so
+// gating here means no write can occur before the target is proven.
+let VERIFIED_TARGET = null;
+
 function getSupabase() {
+  if (VERIFIED_TARGET === null) {
+    throw new TestEnvironmentRefused(
+      "getSupabase() called before the target was verified",
+      "the environment guard must pass before any database access",
+    );
+  }
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
+    // The DEDICATED test credential. The production-named
+    // SUPABASE_SERVICE_ROLE_KEY is deliberately never read by this suite.
+    process.env[TEST_KEY_VAR],
   );
 }
 
@@ -1902,6 +1931,27 @@ async function main() {
   console.log("╚══════════════════════════════════════════════════╝");
   console.log(`\nBase URL: ${BASE_URL}`);
   console.log(`Timestamp: ${new Date().toISOString()}`);
+
+  // ── GATE — before any test, any probe, any write ─────────────────
+  // Nothing below this point runs until the target is proven to be a
+  // dedicated test environment. A refusal exits non-zero without having
+  // touched the database.
+  try {
+    VERIFIED_TARGET = await assertTestEnvironment(
+      process.env,
+      supabaseProbe(
+        createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL || "http://invalid.invalid",
+          process.env[TEST_KEY_VAR] || "missing",
+        ),
+      ),
+    );
+    console.log(`Target verified: ${VERIFIED_TARGET}\n`);
+  } catch (err) {
+    console.error(`\n${err.message}\n`);
+    console.error("No database access was attempted beyond the read-only marker check.");
+    process.exit(2);
+  }
 
   try {
     await testEnvironment();
